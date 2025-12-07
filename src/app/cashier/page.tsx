@@ -7,11 +7,6 @@ import { ArrowLeft, Printer, CheckCircle, AlertTriangle, ChefHat, TicketPercent,
 import generatePayload from "promptpay-qr";
 import QRCode from "qrcode";
 
-// --- ❌ ลบค่าคงที่ออก (เพราะเราจะใช้ค่าจาก Database แทน) ---
-// const SHOP_PROMPTPAY_ID = "0812345678"; 
-// const SHOP_NAME = "ครัวคุณแม่ (My Restaurant)";
-// -------------------------------------------------------
-
 type OrderDetail = {
   order_id: string;
   table_label: string;
@@ -41,7 +36,7 @@ export default function CashierPage() {
   const [qrCodeData, setQrCodeData] = useState<string>("");
 
   // Store Info (ดึงจาก DB)
-  const [shopName, setShopName] = useState("กำลังโหลด..."); // ค่าเริ่มต้น
+  const [shopName, setShopName] = useState("กำลังโหลด...");
   const [promptPayId, setPromptPayId] = useState("");
   const [shopLogo, setShopLogo] = useState<string | null>(null);
 
@@ -93,6 +88,7 @@ export default function CashierPage() {
     let pendingCount = 0;
     const itemMap = new Map<string, any>();
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     order.order_items.forEach((i: any) => {
       if (i.status !== 'served') pendingCount += 1;
       const m = i.menu_items;
@@ -210,11 +206,33 @@ export default function CashierPage() {
     const confirmClose = confirm(`💰 ยอดรับเงินสุทธิ ${calculation.grandTotal.toLocaleString()} บาท\nยืนยันการปิดบิล?`);
     if (!confirmClose) return;
 
+    // ✅ สร้างเลขที่ใบเสร็จ (REC-YYMMDD-HHMMSS)
+    const now = new Date();
+    const year = now.getFullYear().toString().substr(-2);
+    const month = (now.getMonth() + 1).toString().padStart(2, '0');
+    const date = now.getDate().toString().padStart(2, '0');
+    const hours = now.getHours().toString().padStart(2, '0');
+    const minutes = now.getMinutes().toString().padStart(2, '0');
+    const seconds = now.getSeconds().toString().padStart(2, '0');
+    const receiptNo = `REC-${year}${month}${date}-${hours}${minutes}${seconds}`;
+
     // Update Order (รายรับจะไปรวมยอดตอนปิดร้าน Daily Batch)
-    await supabase.from("orders").update({ status: "completed", total_price: calculation.grandTotal }).eq("id", selectedOrder.order_id);
+    // ✅ เพิ่มการบันทึกชื่อโปรโมชั่น (promotion_name) และเลขที่ใบเสร็จ (receipt_no)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const updatePayload: any = {
+      status: "completed",
+      total_price: calculation.grandTotal,
+      receipt_no: receiptNo // ✅ บันทึกเลขที่ใบเสร็จ
+    };
+
+    if (calculation.discountName) {
+      updatePayload.promotion_name = calculation.discountName; // ✅ บันทึกชื่อโปรโมชั่น
+    }
+
+    await supabase.from("orders").update(updatePayload).eq("id", selectedOrder.order_id);
     await supabase.from("tables").update({ status: "available" }).eq("id", selectedOrder.table_id);
 
-    alert("ปิดบิลเรียบร้อย ✅");
+    alert(`ปิดบิลเรียบร้อย ✅\nเลขที่ใบเสร็จ: ${receiptNo}`);
     setSelectedOrder(null);
     fetchOccupiedTables();
   };
