@@ -67,24 +67,33 @@ export default function SettingsTab() {
       for (let i = currentCount + 1; i <= target; i++) newTables.push({ label: `${prefix}${i}`, status: 'available' });
       if (newTables.length) await supabase.from("tables").insert(newTables);
     } else if (target < currentCount) {
-      // Note: ในการใช้งานจริงควรเช็คก่อนว่าโต๊ะว่างไหม แต่ใน Admin อนุญาตให้ลบได้เลย
       const toDel = current?.slice(target).map(t => t.id) || [];
       if (toDel.length) await supabase.from("tables").delete().in("id", toDel);
     }
   };
 
   const handleCleanup = async () => {
+    // ✅ 1. ตรวจสอบสถานะร้าน (ต้องปิดร้านก่อน)
+    const { data: settings } = await supabase.from("store_settings").select("is_open").eq("id", 1).single();
+    if (settings?.is_open) {
+      return alert("⛔ ไม่สามารถล้างข้อมูลได้: ระบบแจ้งว่า 'ร้านยังเปิดอยู่'\nกรุณากด 'ปิดร้าน' ที่มุมขวาบนก่อนทำรายการครับ");
+    }
+
+    // ✅ 2. ตรวจสอบว่ามีโต๊ะค้างอยู่ไหม (ต้องไม่มีลูกค้า)
+    const { count: occupiedCount } = await supabase.from("tables").select("*", { count: 'exact', head: true }).eq("status", "occupied");
+    if (occupiedCount && occupiedCount > 0) {
+      return alert(`⛔ ไม่สามารถล้างข้อมูลได้: ยังมีลูกค้าใช้งานอยู่ ${occupiedCount} โต๊ะ\nกรุณาเคลียร์โต๊ะให้ว่างทั้งหมดก่อนครับ`);
+    }
+
     if (!cleanupDate) return alert("กรุณาเลือกวันที่");
 
-    // ✅ แก้ไข: ให้พิมพ์ delete ตัวเล็กหรือตัวใหญ่ก็ได้ และตัดช่องว่างออก
-    const confirmMsg = prompt('พิมพ์ "DELETE" เพื่อยืนยันการลบข้อมูลถาวร');
+    const confirmMsg = prompt('⚠️ คำเตือน: การลบนี้กู้คืนไม่ได้!\nพิมพ์ "DELETE" เพื่อยืนยันการลบข้อมูลถาวร');
     if (confirmMsg?.trim().toUpperCase() !== "DELETE") return;
 
     setIsCleaning(true);
     try {
       const cutOff = new Date(cleanupDate).toISOString();
 
-      // 1. ดึงรายการออเดอร์เก่า
       const { data: oldOrders, error: fetchError } = await supabase
         .from('orders')
         .select('id')
@@ -97,7 +106,6 @@ export default function SettingsTab() {
         const ids = oldOrders.map(o => o.id);
         console.log(`กำลังลบ ${ids.length} ออเดอร์...`);
 
-        // 2. ลบรายการอาหารในออเดอร์ก่อน (Order Items) เพื่อแก้ปัญหา Foreign Key
         const { error: itemError } = await supabase
           .from('order_items')
           .delete()
@@ -105,7 +113,6 @@ export default function SettingsTab() {
 
         if (itemError) throw itemError;
 
-        // 3. ลบตัวออเดอร์ (Orders)
         const { error: orderError } = await supabase
           .from('orders')
           .delete()
@@ -114,7 +121,6 @@ export default function SettingsTab() {
         if (orderError) throw orderError;
       }
 
-      // 4. ลบ Transaction (รายรับรายจ่ายอื่นๆ)
       const { error: transError } = await supabase
         .from('transactions')
         .delete()
@@ -127,7 +133,6 @@ export default function SettingsTab() {
 
     } catch (error: any) {
       console.error("Cleanup Error:", error);
-      // ✅ แสดงข้อความ Error จริงๆ ออกมาเพื่อให้รู้สาเหตุ
       alert(`เกิดข้อผิดพลาดในการลบ: ${error.message || error}`);
     } finally {
       setIsCleaning(false);
@@ -155,10 +160,10 @@ export default function SettingsTab() {
         <div className="flex flex-col md:flex-row items-center gap-6">
           <div className="flex-1">
             <p className="text-red-800 font-bold mb-2">เลือกระยะเวลา</p>
-            <p className="text-sm text-red-600 mb-4">ข้อมูลเก่ากว่าวันที่เลือกจะถูกลบถาวร (ควร Export CSV ก่อน)</p>
+            <p className="text-sm text-red-600 mb-4">ข้อมูลเก่ากว่าวันที่เลือกจะถูกลบถาวร (เฉพาะสถานะ Completed/Cancelled)</p>
             <input type="date" value={cleanupDate} onChange={e => setCleanupDate(e.target.value)} className="border-2 border-red-200 p-2 rounded-lg cursor-pointer" />
           </div>
-          <button onClick={handleCleanup} disabled={isCleaning || !cleanupDate} className="bg-red-600 hover:bg-red-700 text-white px-6 py-4 rounded-xl font-bold shadow-lg disabled:bg-gray-400">{isCleaning ? "กำลังลบ..." : "⚠️ ลบข้อมูลถาวร"}</button>
+          <button onClick={handleCleanup} disabled={isCleaning || !cleanupDate} className="bg-red-600 hover:bg-red-700 text-white px-6 py-4 rounded-xl font-bold shadow-lg disabled:bg-gray-400">{isCleaning ? "กำลังตรวจสอบ..." : "⚠️ ลบข้อมูลถาวร"}</button>
         </div>
       </div>
     </div>
