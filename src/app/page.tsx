@@ -5,9 +5,7 @@ import { supabase } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Settings, LogOut, Lock, Utensils, ShoppingBag } from "lucide-react";
-import { logout, getSession } from "./actions"; // ✅ Import actions
-
-// ลบฟังก์ชัน getCookie แบบเดิมออก เพราะอ่าน HttpOnly Cookie ไม่ได้แล้ว
+import { logout, getSession } from "./actions"; // ✅ ใช้ Server Action แทนการอ่าน Cookie โดยตรง
 
 type Table = {
   id: number;
@@ -27,7 +25,7 @@ export default function Home() {
   const router = useRouter();
 
   useEffect(() => {
-    // ✅ 1. เรียก Server Action เพื่อเช็ค Role
+    // ✅ 1. เรียก Server Action เพื่อเช็ค Role อย่างปลอดภัย
     const checkUser = async () => {
       const session = await getSession();
       setUserRole(session.role);
@@ -54,14 +52,13 @@ export default function Home() {
     }
   };
 
-  // ✅ 2. ใช้ Server Action สำหรับ Logout
+  // ✅ 2. ใช้ Server Action สำหรับ Logout (ลบ HttpOnly Cookie)
   const handleLogout = async () => {
     await logout();
     window.location.href = "/login";
   };
 
   const handleTableClick = async (table: Table) => {
-    // ... (ส่วนนี้เหมือนเดิม) ...
     if (!isStoreOpen) { alert("⛔ ร้านปิดอยู่ครับ ไม่สามารถเปิดบิลใหม่ได้"); return; }
 
     const { data: settings } = await supabase.from("store_settings").select("is_open").eq("id", 1).single();
@@ -80,15 +77,27 @@ export default function Home() {
         router.push(`/order/${newOrder.id}`);
       } catch (error) { console.error("Error opening table:", error); alert("เกิดข้อผิดพลาด"); }
     } else {
+      // กรณีโต๊ะไม่ว่าง (Occupied)
       const { data: activeOrder } = await supabase.from("orders").select("id").eq("table_id", table.id).eq("status", "active").single();
-      if (activeOrder) router.push(`/order/${activeOrder.id}`); else alert("ไม่พบข้อมูลออเดอร์");
+
+      if (activeOrder) {
+        // ถ้าเจอออเดอร์ -> ไปหน้าสั่งอาหาร
+        router.push(`/order/${activeOrder.id}`);
+      } else {
+        // ✅ 3. ถ้าไม่เจอออเดอร์ (โต๊ะค้าง) -> ถามเพื่อ Force Reset
+        const confirmReset = confirm(`⚠️ ไม่พบออเดอร์ปัจจุบันของ ${table.label} (แต่สถานะโต๊ะขึ้นว่าไม่ว่าง)\n\nต้องการ "รีเซ็ตโต๊ะให้ว่าง" หรือไม่?`);
+        if (confirmReset) {
+          await supabase.from("tables").update({ status: "available" }).eq("id", table.id);
+          alert("รีเซ็ตสถานะโต๊ะเรียบร้อย ✅");
+          fetchData(); // โหลดข้อมูลใหม่ทันที
+        }
+      }
     }
   };
 
   const takeawayTables = tables.filter(t => t.label.startsWith("TA"));
   const dineInTables = tables.filter(t => !t.label.startsWith("TA"));
 
-  // ... (ส่วน Render TableButton เหมือนเดิม) ...
   const TableButton = ({ table, isTakeaway = false }: { table: Table, isTakeaway?: boolean }) => (
     <button
       onClick={() => handleTableClick(table)}

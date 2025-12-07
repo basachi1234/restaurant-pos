@@ -1,11 +1,11 @@
 "use client";
 
-import { useState, useMemo, useCallback, memo, useEffect } from "react";
+import { useState, useMemo, useCallback, memo, useEffect, useRef } from "react"; // ✅ 1. เพิ่ม useRef
 import { useRouter } from "next/navigation";
 import Image from "next/image";
-import { ShoppingCart, ArrowLeft, Plus, Minus, Receipt, X, Clock, Trash2, MessageSquare, Scale } from "lucide-react"; // เพิ่ม Scale
+import { ShoppingCart, ArrowLeft, Plus, Minus, Receipt, X, Clock, Trash2, MessageSquare, Scale } from "lucide-react";
 import { supabase } from "@/lib/supabase";
-import { MenuItem } from "@/lib/types"; // Import Type กลาง
+import { MenuItem } from "@/lib/types";
 
 // --- Helper: อ่าน Cookie ---
 const getCookie = (name: string): string | undefined => {
@@ -13,9 +13,6 @@ const getCookie = (name: string): string | undefined => {
   const match = document.cookie.match(new RegExp('(^| )' + name + '=([^;]+)'));
   return match ? match[2] : undefined;
 };
-
-// --- Types ---
-// ลบ MenuItem type ที่ประกาศซ้ำออก และใช้จาก import แทน
 
 type CartItem = MenuItem & { quantity: number; note: string };
 
@@ -36,7 +33,7 @@ const MenuItemCard = memo(({
   onAdd,
   onRemove,
   onUpdateNote,
-  onUpdateQty // ✅ ฟังก์ชันสำหรับอัปเดตจำนวนโดยตรง
+  onUpdateQty
 }: {
   item: MenuItem;
   qty: number;
@@ -75,7 +72,6 @@ const MenuItemCard = memo(({
         <h3 className="font-bold text-gray-800 text-lg truncate">{item.name}</h3>
         <div className="flex items-center gap-2">
           <p className="text-gray-500 font-medium">{item.price} ฿ {item.is_weight ? '/ หน่วย' : ''}</p>
-          {/* แสดงป้ายกำกับถ้าเป็นของชั่งน้ำหนัก */}
           {item.is_weight && (
             <span className="text-[10px] bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full flex items-center gap-1 border border-orange-200">
               <Scale size={10} /> ชั่ง นน.
@@ -96,10 +92,7 @@ const MenuItemCard = memo(({
       </div>
 
       <div className="flex flex-col items-end gap-2 mt-1">
-
-        {/* --- 🔄 LOGIC เลือกปุ่มกด --- */}
         {item.is_weight ? (
-          // ⚖️ กรณี: ขายตามน้ำหนัก (แสดงช่องกรอกตัวเลข)
           qty === 0 ? (
             <button
               onClick={() => {
@@ -126,7 +119,6 @@ const MenuItemCard = memo(({
             </div>
           )
         ) : (
-          // 🍛 กรณี: ขายปกติ (แสดงปุ่ม +/-)
           qty === 0 ? (
             <button
               onClick={() => onAdd(item)}
@@ -142,7 +134,6 @@ const MenuItemCard = memo(({
             </div>
           )
         )}
-
       </div>
     </div>
   );
@@ -172,6 +163,9 @@ export default function OrderClient({
 
   const [userRole, setUserRole] = useState<string | undefined>(undefined);
 
+  // ✅ 2. สร้าง Reference สำหรับไฟล์เสียง
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
   useEffect(() => {
     setUserRole(getCookie('user_role'));
   }, []);
@@ -199,6 +193,14 @@ export default function OrderClient({
     return cart.reduce((s, i) => s + (i.is_weight ? 1 : i.quantity), 0);
   }, [cart]);
 
+  // ✅ 3. ฟังก์ชันเล่นเสียง
+  const playSound = () => {
+    if (audioRef.current) {
+      audioRef.current.currentTime = 0;
+      audioRef.current.play().catch(err => console.warn("Audio blocked:", err));
+    }
+  };
+
   const addToCart = useCallback((item: MenuItem) => {
     setCart((prev) => {
       const existing = prev.find((i) => i.id === item.id);
@@ -223,7 +225,6 @@ export default function OrderClient({
     });
   }, []);
 
-  // ✅ ฟังก์ชันอัปเดตจำนวนโดยตรง (สำหรับพิมพ์ตัวเลข)
   const updateQtyDirectly = useCallback((itemId: number, newQty: number) => {
     if (newQty <= 0) {
       setCart((prev) => prev.filter((i) => i.id !== itemId));
@@ -269,6 +270,10 @@ export default function OrderClient({
     try {
       const { error } = await supabase.from("order_items").insert(orderItemsData);
       if (error) throw error;
+
+      // ✅ 4. เล่นเสียงเมื่อส่งสำเร็จ
+      playSound();
+
       alert("ส่งออเดอร์เรียบร้อย! ✅");
       setCart([]);
     } catch (error) {
@@ -320,6 +325,9 @@ export default function OrderClient({
 
   return (
     <div className="min-h-screen bg-gray-50 pb-32">
+      {/* ✅ 5. ฝัง Element Audio ไว้ (ใช้ไฟล์เดียวกับครัว หรือจะเปลี่ยนไฟล์ใหม่ก็ได้) */}
+      <audio ref={audioRef} src="/notification.mp3" />
+
       <div className="bg-white p-4 shadow-sm sticky top-0 z-10 flex items-center justify-between">
         <button onClick={() => router.push("/")} className="p-2 text-gray-600 bg-gray-100 rounded-full">
           <ArrowLeft />
@@ -342,7 +350,7 @@ export default function OrderClient({
             onAdd={addToCart}
             onRemove={removeFromCart}
             onUpdateNote={updateNote}
-            onUpdateQty={updateQtyDirectly} // ✅ ส่งฟังก์ชันใหม่
+            onUpdateQty={updateQtyDirectly}
           />
         ))}
       </div>

@@ -1,13 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react"; // ✅ เพิ่ม useRef
 import { supabase } from "@/lib/supabase";
-import { CheckCircle, Clock, ArrowLeft, CheckSquare } from "lucide-react";
+import { CheckCircle, Clock, ArrowLeft, CheckSquare, Volume2 } from "lucide-react"; // ✅ เพิ่ม Volume2 (ไอคอนลำโพง)
 import Link from "next/link";
 
 // โครงสร้างข้อมูลสำหรับแสดงผล
 type GroupedOrder = {
-    unique_key: string; // Key สำหรับ React (เพราะ order_id จะซ้ำได้ถ้าแยกกล่อง)
+    unique_key: string;
     order_id: string;
     table_label: string;
     created_at: string;
@@ -19,21 +19,11 @@ type GroupedOrder = {
     }[];
 };
 
-// Interface สำหรับข้อมูล Raw จาก Supabase
-interface OrderItemRaw {
-    id: number;
-    order_id: string;
-    quantity: number;
-    notes: string | null;
-    created_at: string;
-    menu_items: { name: string } | null;
-    orders: {
-        tables: { label: string } | null;
-    } | null;
-}
-
 export default function KitchenPage() {
     const [groupedOrders, setGroupedOrders] = useState<GroupedOrder[]>([]);
+
+    // ✅ 1. สร้าง Reference สำหรับไฟล์เสียง
+    const audioRef = useRef<HTMLAudioElement | null>(null);
 
     useEffect(() => {
         fetchOrders();
@@ -43,7 +33,14 @@ export default function KitchenPage() {
             .on(
                 "postgres_changes",
                 { event: "*", schema: "public", table: "order_items" },
-                () => fetchOrders()
+                (payload) => {
+                    fetchOrders();
+
+                    // ✅ 2. เช็คว่าถ้าเป็นรายการใหม่ (INSERT) ให้เล่นเสียง
+                    if (payload.eventType === 'INSERT') {
+                        playSound();
+                    }
+                }
             )
             .subscribe();
 
@@ -51,6 +48,16 @@ export default function KitchenPage() {
             supabase.removeChannel(channel);
         };
     }, []);
+
+    // ✅ 3. ฟังก์ชันเล่นเสียง (พร้อมกัน Error กรณี Browser Block)
+    const playSound = () => {
+        if (audioRef.current) {
+            audioRef.current.currentTime = 0; // เริ่มเล่นใหม่ตั้งแต่ต้น
+            audioRef.current.play().catch((err) => {
+                console.warn("Audio autoplay blocked:", err);
+            });
+        }
+    };
 
     const fetchOrders = async () => {
         const { data: rawItems, error } = await supabase
@@ -63,7 +70,7 @@ export default function KitchenPage() {
         )
       `)
             .eq("status", "pending")
-            .order("created_at", { ascending: true }); // เรียงตามเวลาที่กดสั่ง
+            .order("created_at", { ascending: true });
 
         if (error) {
             console.error("Kitchen Error:", error);
@@ -72,18 +79,15 @@ export default function KitchenPage() {
 
         // --- Logic การ Group แบบแยกบิล (Split Batch) ---
         const groups: GroupedOrder[] = [];
-        const lastGroupIndices: Record<string, number> = {}; // จำตำแหน่งล่าสุดของแต่ละโต๊ะ
+        const lastGroupIndices: Record<string, number> = {};
 
-        // Cast ข้อมูลให้เป็น Type ที่เรากำหนดไว้
-        const items = rawItems as unknown as OrderItemRaw[];
-
-        items.forEach((item) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (rawItems as any[]).forEach((item) => {
             const orderId = item.order_id;
             const itemTime = new Date(item.created_at).getTime();
 
             let addedToExisting = false;
 
-            // 1. เช็คว่ามีกล่องของโต๊ะนี้อยู่ก่อนไหม
             if (lastGroupIndices[orderId] !== undefined) {
                 const groupIndex = lastGroupIndices[orderId];
                 const group = groups[groupIndex];
@@ -91,7 +95,6 @@ export default function KitchenPage() {
                 const groupTime = new Date(group.created_at).getTime();
                 const diffInMinutes = (itemTime - groupTime) / 1000 / 60;
 
-                // 2. ถ้าสั่งห่างกันไม่เกิน 2 นาที ให้รวมในกล่องเดิม (ถือว่ารอบเดียวกัน)
                 if (diffInMinutes < 2) {
                     group.items.push({
                         id: item.id,
@@ -103,10 +106,9 @@ export default function KitchenPage() {
                 }
             }
 
-            // 3. ถ้าไม่มีกล่อง หรือ สั่งห่างกันนานแล้ว -> สร้างกล่องใหม่ (New Box)
             if (!addedToExisting) {
                 const newGroup: GroupedOrder = {
-                    unique_key: `${orderId}_${item.id}`, // สร้าง ID ไม่ซ้ำสำหรับกล่องนี้
+                    unique_key: `${orderId}_${item.id}`,
                     order_id: orderId,
                     table_label: item.orders?.tables?.label || "?",
                     created_at: item.created_at,
@@ -119,7 +121,6 @@ export default function KitchenPage() {
                 };
 
                 groups.push(newGroup);
-                // อัปเดตว่ากล่องล่าสุดของโต๊ะนี้ อยู่ที่ index นี้นะ
                 lastGroupIndices[orderId] = groups.length - 1;
             }
         });
@@ -138,6 +139,9 @@ export default function KitchenPage() {
 
     return (
         <div className="min-h-screen bg-gray-900 p-4 text-white">
+            {/* ✅ 4. ซ่อน Element Audio ไว้ตรงนี้ (ต้องมีไฟล์ใน folder public) */}
+            <audio ref={audioRef} src="/notification.mp3" />
+
             {/* Header */}
             <div className="flex justify-between items-center mb-6 bg-gray-800 p-4 rounded-xl shadow-lg border border-gray-700">
                 <Link
@@ -148,19 +152,29 @@ export default function KitchenPage() {
                     กลับหน้าร้าน
                 </Link>
 
-                <h1 className="text-2xl md:text-3xl font-bold flex items-center gap-2">
-                    👨‍🍳 รายการอาหารเข้าครัว <span className="bg-orange-600 text-sm px-2 py-1 rounded-full">{groupedOrders.length} บิล</span>
-                </h1>
+                <div className="flex items-center gap-4">
+                    {/* ✅ 5. ปุ่มทดสอบเสียง (เผื่อ Browser Block Auto-play) */}
+                    <button
+                        onClick={playSound}
+                        className="bg-gray-700 p-2 rounded-full hover:bg-gray-600 text-yellow-400 transition-all border border-gray-600"
+                        title="ทดสอบเสียงเตือน / เปิดใช้งานเสียง"
+                    >
+                        <Volume2 size={24} />
+                    </button>
+
+                    <h1 className="text-2xl md:text-3xl font-bold flex items-center gap-2">
+                        👨‍🍳 รายการอาหารเข้าครัว <span className="bg-orange-600 text-sm px-2 py-1 rounded-full">{groupedOrders.length} บิล</span>
+                    </h1>
+                </div>
             </div>
 
             {/* Grid แสดงกล่องออเดอร์ */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
                 {groupedOrders.map((group) => (
                     <div
-                        key={group.unique_key} // ใช้ Key ใหม่ที่ไม่ซ้ำ
+                        key={group.unique_key}
                         className="bg-white text-gray-800 rounded-xl shadow-2xl overflow-hidden flex flex-col border-t-4 border-orange-500 animate-in fade-in zoom-in duration-300"
                     >
-                        {/* 1. หัวกล่อง */}
                         <div className="bg-orange-50 p-3 flex justify-between items-center border-b border-orange-100">
                             <span className="text-3xl font-black text-orange-600 tracking-tighter">
                                 {group.table_label}
@@ -174,7 +188,6 @@ export default function KitchenPage() {
                             </span>
                         </div>
 
-                        {/* 2. รายการอาหาร */}
                         <div className="flex-1 p-0">
                             {group.items.map((item, index) => (
                                 <div
@@ -204,7 +217,6 @@ export default function KitchenPage() {
                             ))}
                         </div>
 
-                        {/* 3. ปุ่มเสร็จทั้งหมด */}
                         <div className="p-3 bg-gray-50 border-t">
                             <button
                                 onClick={() => markAllDone(group.items)}
