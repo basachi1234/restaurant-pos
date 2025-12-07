@@ -3,30 +3,26 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Lock, User, Loader2 } from "lucide-react";
-import { verifyUserPin } from "../actions"; // เรียกใช้ฟังก์ชันใหม่
+import { login } from "../actions"; // ✅ เรียกใช้ login action แทน
 
 export default function LoginPage() {
     const [password, setPassword] = useState("");
     const [loading, setLoading] = useState(false);
-    const router = useRouter();
+    // const router = useRouter(); // ไม่ได้ใช้ ลบออกได้
 
     const handleLogin = async (e: React.FormEvent) => {
         e.preventDefault();
         setLoading(true);
 
         try {
-            // ส่งรหัสไปเช็คที่ Server Action
-            const result = await verifyUserPin(password);
+            // ✅ เรียก Server Action เพื่อ Login และฝัง HttpOnly Cookie
+            const result = await login(password);
 
-            if (result.success && result.user) {
-                // ถ้ารหัสถูก -> ฝัง Cookie ตามสิทธิ์ (Role) ที่ได้จาก DB จริงๆ
-                const role = result.user.role;
-                document.cookie = `user_role=${role}; path=/; max-age=86400; SameSite=Lax`;
-
-                // บังคับโหลดหน้าใหม่เพื่อเข้าสู่ระบบ
+            if (result.success) {
+                // บังคับโหลดหน้าใหม่เพื่อเข้าสู่ระบบ (Middleware จะปล่อยผ่านเพราะมี Cookie แล้ว)
                 window.location.href = "/";
             } else {
-                alert("รหัสผ่านไม่ถูกต้อง");
+                alert(result.message || "รหัสผ่านไม่ถูกต้อง");
                 setPassword("");
                 setLoading(false);
             }

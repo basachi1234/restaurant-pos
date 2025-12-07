@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { MenuItem, Category, UserProfile, Transaction, TopItem, Discount } from "@/lib/types";
+import { logout } from "@/app/actions"; // ✅ Import logout action
 
 // Import Components
 import AdminLogin from "@/components/admin/AdminLogin";
@@ -18,13 +19,13 @@ import AccountingTab from "@/components/admin/AccountingTab";
 import StaffTab from "@/components/admin/StaffTab";
 import DiscountsTab from "@/components/admin/DiscountsTab";
 
+// ✅ กำหนด Type สำหรับ State และ Data ที่ดึงมา
 type DashboardStats = {
   totalRevenue: number;
   totalOrders: number;
   averageOrderValue: number;
 };
 
-// เพิ่ม Type สำหรับข้อมูล Order ที่ดึงมาคำนวณ
 type OrderWithItems = {
   id: number;
   total_price: number;
@@ -66,8 +67,8 @@ export default function AdminPage() {
     if (menuData) setMenuItems(menuData);
     if (catData) setCategories(catData);
     if (userData) setUsers(userData as UserProfile[]);
-    if (transData) setTransactions(transData as Transaction[]);
-    if (discData) setDiscounts(discData as Discount[]);
+    if (transData) setTransactions(transData as Transaction[]); // ✅ Type casting
+    if (discData) setDiscounts(discData as Discount[]); // ✅ Type casting
     if (storeSettings) setIsStoreOpen(storeSettings.is_open);
     setActiveTableCount(occupiedCount || 0);
 
@@ -81,7 +82,7 @@ export default function AdminPage() {
       .gte("created_at", todayISO);
 
     if (orders) {
-      // Cast data to known structure for calculation
+      // ✅ Cast data เพื่อคำนวณ Stats
       const safeOrders = orders as unknown as OrderWithItems[];
 
       const totalRevenue = safeOrders.reduce((sum, o) => sum + (o.total_price || 0), 0);
@@ -130,8 +131,9 @@ export default function AdminPage() {
     fetchData();
   };
 
-  const handleLogout = () => {
-    document.cookie = "user_role=; path=/; max-age=0";
+  // ✅ เปลี่ยนฟังก์ชัน Logout ให้ใช้ Server Action
+  const handleLogout = async () => {
+    await logout();
     window.location.href = "/login";
   };
 
