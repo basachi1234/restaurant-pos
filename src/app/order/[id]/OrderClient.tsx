@@ -2,9 +2,10 @@
 
 import { useState, useMemo, useCallback, memo, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import Image from "next/image"; 
+import Image from "next/image";
 import { ShoppingCart, ArrowLeft, Plus, Minus, Receipt, X, Clock, Trash2, MessageSquare, Scale } from "lucide-react"; // เพิ่ม Scale
 import { supabase } from "@/lib/supabase";
+import { MenuItem } from "@/lib/types"; // Import Type กลาง
 
 // --- Helper: อ่าน Cookie ---
 const getCookie = (name: string): string | undefined => {
@@ -14,14 +15,7 @@ const getCookie = (name: string): string | undefined => {
 };
 
 // --- Types ---
-type MenuItem = {
-  id: number;
-  name: string;
-  price: number;
-  category_id: number;
-  image_url: string | null;
-  is_weight?: boolean; // ✅ เพิ่ม Type นี้
-};
+// ลบ MenuItem type ที่ประกาศซ้ำออก และใช้จาก import แทน
 
 type CartItem = MenuItem & { quantity: number; note: string };
 
@@ -35,24 +29,24 @@ type OrderHistoryItem = {
 };
 
 // --- Sub-Component: การ์ดเมนู ---
-const MenuItemCard = memo(({ 
-  item, 
-  qty, 
-  note, 
-  onAdd, 
+const MenuItemCard = memo(({
+  item,
+  qty,
+  note,
+  onAdd,
   onRemove,
   onUpdateNote,
   onUpdateQty // ✅ ฟังก์ชันสำหรับอัปเดตจำนวนโดยตรง
-}: { 
-  item: MenuItem; 
-  qty: number; 
+}: {
+  item: MenuItem;
+  qty: number;
   note: string;
-  onAdd: (item: MenuItem) => void; 
-  onRemove: (itemId: number) => void; 
+  onAdd: (item: MenuItem) => void;
+  onRemove: (itemId: number) => void;
   onUpdateNote: (itemId: number, note: string) => void;
   onUpdateQty: (itemId: number, newQty: number) => void;
 }) => {
-  
+
   const handleEditNote = () => {
     const newNote = prompt(`ระบุหมายเหตุสำหรับ "${item.name}" \n(เช่น เผ็ดน้อย, ไม่ใส่ผัก)`, note);
     if (newNote !== null) {
@@ -64,11 +58,11 @@ const MenuItemCard = memo(({
     <div className={`bg-white p-4 rounded-lg shadow flex gap-4 items-start transition-all ${qty > 0 ? 'border-2 border-blue-500 bg-blue-50' : ''}`}>
       <div className="flex-shrink-0 relative w-20 h-20 mt-1">
         {item.image_url ? (
-          <Image 
-            src={item.image_url} 
+          <Image
+            src={item.image_url}
             alt={item.name}
-            fill 
-            sizes="80px" 
+            fill
+            sizes="80px"
             className="object-cover rounded-lg bg-gray-200"
             loading="lazy"
           />
@@ -80,21 +74,20 @@ const MenuItemCard = memo(({
       <div className="flex-1 min-w-0">
         <h3 className="font-bold text-gray-800 text-lg truncate">{item.name}</h3>
         <div className="flex items-center gap-2">
-            <p className="text-gray-500 font-medium">{item.price} ฿ {item.is_weight ? '/ หน่วย' : ''}</p>
-            {/* แสดงป้ายกำกับถ้าเป็นของชั่งน้ำหนัก */}
-            {item.is_weight && (
-                <span className="text-[10px] bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full flex items-center gap-1 border border-orange-200">
-                    <Scale size={10}/> ชั่ง นน.
-                </span>
-            )}
+          <p className="text-gray-500 font-medium">{item.price} ฿ {item.is_weight ? '/ หน่วย' : ''}</p>
+          {/* แสดงป้ายกำกับถ้าเป็นของชั่งน้ำหนัก */}
+          {item.is_weight && (
+            <span className="text-[10px] bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full flex items-center gap-1 border border-orange-200">
+              <Scale size={10} /> ชั่ง นน.
+            </span>
+          )}
         </div>
-        
+
         {qty > 0 && (
-          <button 
+          <button
             onClick={handleEditNote}
-            className={`mt-2 text-xs flex items-center gap-1 px-2 py-1 rounded-md border transition-colors ${
-              note ? "bg-yellow-100 text-yellow-800 border-yellow-200" : "bg-white text-gray-500 border-gray-200 hover:bg-gray-100"
-            }`}
+            className={`mt-2 text-xs flex items-center gap-1 px-2 py-1 rounded-md border transition-colors ${note ? "bg-yellow-100 text-yellow-800 border-yellow-200" : "bg-white text-gray-500 border-gray-200 hover:bg-gray-100"
+              }`}
           >
             <MessageSquare size={12} />
             {note ? <span className="font-bold truncate max-w-[120px]">{note}</span> : "เพิ่มหมายเหตุ"}
@@ -103,51 +96,51 @@ const MenuItemCard = memo(({
       </div>
 
       <div className="flex flex-col items-end gap-2 mt-1">
-        
+
         {/* --- 🔄 LOGIC เลือกปุ่มกด --- */}
         {item.is_weight ? (
-            // ⚖️ กรณี: ขายตามน้ำหนัก (แสดงช่องกรอกตัวเลข)
-            qty === 0 ? (
-                <button 
-                  onClick={() => {
-                      const val = prompt(`ระบุน้ำหนัก/จำนวน ของ "${item.name}"`);
-                      if(val) {
-                          const num = parseFloat(val);
-                          if(!isNaN(num) && num > 0) onUpdateQty(item.id, num);
-                      }
-                  }}
-                  className="bg-orange-500 text-white px-3 py-2 rounded-lg font-bold shadow-sm hover:bg-orange-600 flex items-center gap-1 text-sm"
-                >
-                  <Scale size={16}/> ระบุจำนวน
-                </button>
-            ) : (
-                <div className="flex items-center gap-2">
-                    <input 
-                        type="number" 
-                        value={qty} 
-                        step="0.1"
-                        onChange={(e) => onUpdateQty(item.id, parseFloat(e.target.value) || 0)}
-                        className="w-16 border-2 border-blue-500 rounded-lg p-1 text-center font-bold text-lg outline-none focus:ring-2 focus:ring-blue-300 bg-white"
-                    />
-                    <button onClick={() => onRemove(item.id)} className="p-2 bg-red-100 text-red-500 rounded-lg hover:bg-red-200 transition-colors"><Trash2 size={18}/></button>
-                </div>
-            )
+          // ⚖️ กรณี: ขายตามน้ำหนัก (แสดงช่องกรอกตัวเลข)
+          qty === 0 ? (
+            <button
+              onClick={() => {
+                const val = prompt(`ระบุน้ำหนัก/จำนวน ของ "${item.name}"`);
+                if (val) {
+                  const num = parseFloat(val);
+                  if (!isNaN(num) && num > 0) onUpdateQty(item.id, num);
+                }
+              }}
+              className="bg-orange-500 text-white px-3 py-2 rounded-lg font-bold shadow-sm hover:bg-orange-600 flex items-center gap-1 text-sm"
+            >
+              <Scale size={16} /> ระบุจำนวน
+            </button>
+          ) : (
+            <div className="flex items-center gap-2">
+              <input
+                type="number"
+                value={qty}
+                step="0.1"
+                onChange={(e) => onUpdateQty(item.id, parseFloat(e.target.value) || 0)}
+                className="w-16 border-2 border-blue-500 rounded-lg p-1 text-center font-bold text-lg outline-none focus:ring-2 focus:ring-blue-300 bg-white"
+              />
+              <button onClick={() => onRemove(item.id)} className="p-2 bg-red-100 text-red-500 rounded-lg hover:bg-red-200 transition-colors"><Trash2 size={18} /></button>
+            </div>
+          )
         ) : (
-            // 🍛 กรณี: ขายปกติ (แสดงปุ่ม +/-)
-            qty === 0 ? (
-              <button 
-                onClick={() => onAdd(item)}
-                className="bg-blue-100 text-blue-600 px-4 py-2 rounded-full font-bold shadow-sm hover:bg-blue-200 flex items-center gap-1"
-              >
-                เพิ่ม <Plus size={16}/>
-              </button>
-            ) : (
-              <div className="flex items-center bg-white rounded-full shadow-md border overflow-hidden">
-                <button onClick={() => onRemove(item.id)} className="p-3 text-red-500 hover:bg-red-50 active:bg-red-100"><Minus size={18} /></button>
-                <span className="w-8 text-center font-bold text-lg text-gray-800">{qty}</span>
-                <button onClick={() => onAdd(item)} className="p-3 text-green-600 hover:bg-green-50 active:bg-green-100"><Plus size={18} /></button>
-              </div>
-            )
+          // 🍛 กรณี: ขายปกติ (แสดงปุ่ม +/-)
+          qty === 0 ? (
+            <button
+              onClick={() => onAdd(item)}
+              className="bg-blue-100 text-blue-600 px-4 py-2 rounded-full font-bold shadow-sm hover:bg-blue-200 flex items-center gap-1"
+            >
+              เพิ่ม <Plus size={16} />
+            </button>
+          ) : (
+            <div className="flex items-center bg-white rounded-full shadow-md border overflow-hidden">
+              <button onClick={() => onRemove(item.id)} className="p-3 text-red-500 hover:bg-red-50 active:bg-red-100"><Minus size={18} /></button>
+              <span className="w-8 text-center font-bold text-lg text-gray-800">{qty}</span>
+              <button onClick={() => onAdd(item)} className="p-3 text-green-600 hover:bg-green-50 active:bg-green-100"><Plus size={18} /></button>
+            </div>
+          )
         )}
 
       </div>
@@ -158,17 +151,17 @@ const MenuItemCard = memo(({
 MenuItemCard.displayName = "MenuItemCard";
 
 // --- Main Component ---
-export default function OrderClient({ 
-  initialMenuItems, 
-  orderId, 
-  tableLabel 
-}: { 
-  initialMenuItems: MenuItem[], 
-  orderId: string, 
-  tableLabel: string 
+export default function OrderClient({
+  initialMenuItems,
+  orderId,
+  tableLabel
+}: {
+  initialMenuItems: MenuItem[],
+  orderId: string,
+  tableLabel: string
 }) {
   const router = useRouter();
-  
+
   const [menuItems] = useState<MenuItem[]>(initialMenuItems);
   const [cart, setCart] = useState<CartItem[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -176,7 +169,7 @@ export default function OrderClient({
   const [showHistory, setShowHistory] = useState(false);
   const [historyItems, setHistoryItems] = useState<OrderHistoryItem[]>([]);
   const [historyTotal, setHistoryTotal] = useState(0);
-  
+
   const [userRole, setUserRole] = useState<string | undefined>(undefined);
 
   useEffect(() => {
@@ -203,7 +196,7 @@ export default function OrderClient({
   }, [cart]);
 
   const totalItems = useMemo(() => {
-    return cart.reduce((s,i) => s + (i.is_weight ? 1 : i.quantity), 0);
+    return cart.reduce((s, i) => s + (i.is_weight ? 1 : i.quantity), 0);
   }, [cart]);
 
   const addToCart = useCallback((item: MenuItem) => {
@@ -233,15 +226,15 @@ export default function OrderClient({
   // ✅ ฟังก์ชันอัปเดตจำนวนโดยตรง (สำหรับพิมพ์ตัวเลข)
   const updateQtyDirectly = useCallback((itemId: number, newQty: number) => {
     if (newQty <= 0) {
-        setCart((prev) => prev.filter((i) => i.id !== itemId));
-        return;
+      setCart((prev) => prev.filter((i) => i.id !== itemId));
+      return;
     }
     setCart((prev) => {
       const existing = prev.find((i) => i.id === itemId);
       if (!existing) {
-         const itemInfo = menuItems.find(m => m.id === itemId);
-         if(itemInfo) return [...prev, { ...itemInfo, quantity: newQty, note: "" }];
-         return prev;
+        const itemInfo = menuItems.find(m => m.id === itemId);
+        if (itemInfo) return [...prev, { ...itemInfo, quantity: newQty, note: "" }];
+        return prev;
       }
       return prev.map((i) => i.id === itemId ? { ...i, quantity: newQty } : i);
     });
@@ -269,7 +262,7 @@ export default function OrderClient({
       order_id: orderId,
       menu_item_id: item.id,
       quantity: item.quantity,
-      notes: item.note, 
+      notes: item.note,
       status: "pending",
     }));
 
@@ -277,7 +270,7 @@ export default function OrderClient({
       const { error } = await supabase.from("order_items").insert(orderItemsData);
       if (error) throw error;
       alert("ส่งออเดอร์เรียบร้อย! ✅");
-      setCart([]); 
+      setCart([]);
     } catch (error) {
       console.error(error);
       alert("เกิดข้อผิดพลาด");
@@ -309,8 +302,8 @@ export default function OrderClient({
       return;
     }
 
-    const message = isServed 
-      ? `⚠️ รายการ "${itemName}" เสิร์ฟแล้ว!\nต้องการลบออกจากบิลใช่หรือไม่? (Void)` 
+    const message = isServed
+      ? `⚠️ รายการ "${itemName}" เสิร์ฟแล้ว!\nต้องการลบออกจากบิลใช่หรือไม่? (Void)`
       : `ยืนยันการยกเลิกเมนู "${itemName}" ?\n(รายการจะหายไปจากหน้าจอครัวทันที)`;
 
     if (!confirm(message)) return;
@@ -318,7 +311,7 @@ export default function OrderClient({
     try {
       const { error } = await supabase.from("order_items").delete().eq("id", itemId);
       if (error) throw error;
-      fetchOrderHistory(); 
+      fetchOrderHistory();
     } catch (err) {
       console.error(err);
       alert("ลบรายการไม่สำเร็จ");
@@ -341,14 +334,14 @@ export default function OrderClient({
 
       <div className="p-4 grid gap-4">
         {menuItems.map((item) => (
-          <MenuItemCard 
-            key={item.id} 
-            item={item} 
-            qty={cartQtyMap[item.id] || 0} 
-            note={cartNoteMap[item.id] || ""} 
-            onAdd={addToCart} 
-            onRemove={removeFromCart} 
-            onUpdateNote={updateNote} 
+          <MenuItemCard
+            key={item.id}
+            item={item}
+            qty={cartQtyMap[item.id] || 0}
+            note={cartNoteMap[item.id] || ""}
+            onAdd={addToCart}
+            onRemove={removeFromCart}
+            onUpdateNote={updateNote}
             onUpdateQty={updateQtyDirectly} // ✅ ส่งฟังก์ชันใหม่
           />
         ))}
@@ -359,7 +352,7 @@ export default function OrderClient({
           <div className="flex justify-between items-center mb-4 px-2">
             <div className="flex items-center gap-2 text-gray-700">
               <div className="bg-orange-100 p-2 rounded-full text-orange-600">
-                 <ShoppingCart className="w-5 h-5" />
+                <ShoppingCart className="w-5 h-5" />
               </div>
               <span className="font-bold text-lg">{totalItems} รายการ</span>
             </div>
@@ -383,11 +376,11 @@ export default function OrderClient({
             <div className="p-4 border-b flex justify-between items-center bg-gray-50 rounded-t-2xl">
               <div>
                 <h2 className="font-bold text-xl text-gray-800 flex items-center gap-2">
-                  <Receipt className="text-yellow-600"/> รายการที่สั่ง
+                  <Receipt className="text-yellow-600" /> รายการที่สั่ง
                 </h2>
                 <p className="text-xs text-gray-500">{historyItems.length} รายการ</p>
               </div>
-              <button onClick={() => setShowHistory(false)} className="p-2 bg-gray-200 rounded-full hover:bg-gray-300"><X size={20}/></button>
+              <button onClick={() => setShowHistory(false)} className="p-2 bg-gray-200 rounded-full hover:bg-gray-300"><X size={20} /></button>
             </div>
 
             <div className="overflow-y-auto p-4 flex-1 space-y-3">
@@ -401,7 +394,7 @@ export default function OrderClient({
                         {item.menu_items.name} <span className="text-blue-600">x{item.quantity}</span>
                       </div>
                       <div className="text-sm text-gray-500 flex items-center gap-1 mt-1">
-                        <Clock size={12}/> {new Date(item.created_at).toLocaleTimeString('th-TH', {hour: '2-digit', minute:'2-digit'})}
+                        <Clock size={12} /> {new Date(item.created_at).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })}
                         <span className={`ml-2 px-2 py-0.5 rounded text-xs font-bold ${item.status === 'served' ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'}`}>
                           {item.status === 'served' ? 'เสิร์ฟแล้ว' : 'กำลังทำ'}
                         </span>
@@ -412,16 +405,15 @@ export default function OrderClient({
                         </div>
                       )}
                     </div>
-                    
+
                     <div className="flex flex-col items-end gap-2">
                       <div className="font-bold text-gray-600">{(item.menu_items.price * item.quantity).toLocaleString()}</div>
-                      <button 
+                      <button
                         onClick={() => handleDeleteHistoryItem(item.id, item.status, item.menu_items.name)}
-                        className={`p-2 rounded-full transition-colors ${
-                          item.status === 'served' && userRole === 'staff' 
-                            ? 'text-gray-300 cursor-not-allowed' 
+                        className={`p-2 rounded-full transition-colors ${item.status === 'served' && userRole === 'staff'
+                            ? 'text-gray-300 cursor-not-allowed'
                             : 'text-red-400 hover:text-red-600 hover:bg-red-50'
-                        }`}
+                          }`}
                         title="ยกเลิก/ลบรายการ"
                       >
                         <Trash2 size={18} />

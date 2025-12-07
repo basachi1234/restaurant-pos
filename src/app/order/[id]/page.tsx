@@ -1,13 +1,14 @@
 import { supabase } from "@/lib/supabase";
 import OrderClient from "./OrderClient";
+import { MenuItem } from "@/lib/types";
 
 export default async function OrderPage({ params }: { params: Promise<{ id: string }> }) {
   const { id: orderId } = await params;
 
-  // 1. ดึงข้อมูลเมนู (เพิ่ม is_weight เข้าไปใน select)
+  // 1. ดึงข้อมูลเมนู (ดึงทั้งหมด * เพื่อให้ตรงกับ Type MenuItem)
   const { data: menuData } = await supabase
     .from("menu_items")
-    .select("id, name, price, category_id, image_url, is_weight") // ✅ เพิ่ม is_weight ตรงนี้
+    .select("*")
     .eq("is_available", true)
     .order("category_id", { ascending: true });
 
@@ -21,11 +22,10 @@ export default async function OrderPage({ params }: { params: Promise<{ id: stri
   const tableLabel = (orderData?.tables as any)?.label || "Unknown";
 
   return (
-    <OrderClient 
-      // @ts-ignore
-      initialMenuItems={menuData || []} 
-      orderId={orderId} 
-      tableLabel={tableLabel} 
+    <OrderClient
+      initialMenuItems={(menuData as MenuItem[]) || []}
+      orderId={orderId}
+      tableLabel={tableLabel}
     />
   );
 }

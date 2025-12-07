@@ -11,10 +11,6 @@ const nextConfig = {
       },
     ],
   },
-  // ปิดการเช็ค Type ตอน Build (เพื่อให้ Deploy ผ่านง่ายขึ้น)
-  typescript: {
-    ignoreBuildErrors: true,
-  },
 };
 
 export default nextConfig;
