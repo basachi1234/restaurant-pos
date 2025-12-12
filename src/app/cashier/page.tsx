@@ -134,6 +134,7 @@ export default function CashierPage() {
     const isTakeaway = label.startsWith("TA") || label.startsWith("A");
     const numPart = label.replace(/\D/g, '').padStart(2, '0');
     const prefix = isTakeaway ? 'A' : 'T';
+    // มี REC- และขีดคั่น ทำให้ยาว
     const tempReceiptNo = `REC-${now.getFullYear().toString().substr(-2)}${(now.getMonth()+1).toString().padStart(2,'0')}${now.getDate().toString().padStart(2,'0')}-${now.getHours().toString().padStart(2,'0')}${now.getMinutes().toString().padStart(2,'0')}-${prefix}${numPart}`;
     
     setCurrentReceiptNo(tempReceiptNo);

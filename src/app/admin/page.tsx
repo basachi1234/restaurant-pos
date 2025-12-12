@@ -113,17 +113,52 @@ export default function AdminPage() {
         let startTime = new Date(); startTime.setHours(0, 0, 0, 0);
         if (lastTrans) startTime = new Date(lastTrans.created_at);
 
-        const { data: orders } = await supabase.from("orders").select("total_price").eq("status", "completed").gt("created_at", startTime.toISOString());
+        // ✅ แก้ไข: ดึง created_at มาด้วย และเรียงตามเวลา (เก่า -> ใหม่) เพื่อหาออเดอร์แรก
+        const { data: orders } = await supabase
+          .from("orders")
+          .select("total_price, created_at")
+          .eq("status", "completed")
+          .gt("created_at", startTime.toISOString())
+          .order("created_at", { ascending: true }); // เรียงเวลาจากน้อยไปมาก
+
         const totalSales = orders?.reduce((sum, o) => sum + (o.total_price || 0), 0) || 0;
 
         if (totalSales > 0) {
-          const now = new Date(); let recordDate = new Date(now);
-          if (now.getHours() < 6) { recordDate.setDate(recordDate.getDate() - 1); recordDate.setHours(23, 59, 59, 999); }
-          await supabase.from("transactions").insert({ type: 'income', amount: totalSales, description: `ยอดขายปิดร้าน (${recordDate.toLocaleDateString('th-TH')})`, created_at: recordDate.toISOString() });
-          alert(`บันทึกยอดขาย ${totalSales.toLocaleString()} ฿ แล้ว`);
-        } else { alert("ปิดร้านเรียบร้อย (ไม่มียอดขายใหม่)"); }
-      } catch (e) { console.error(e); alert("Error summarizing sales"); }
-    } else { alert("เปิดร้านแล้ว"); }
+          // ✅ ลอจิกใหม่: ใช้วันที่ของ "ออเดอร์แรกสุด" เป็นวันที่บันทึกยอด
+          let recordDate = new Date();
+          
+          if (orders && orders.length > 0) {
+            // ใช้วันที่ของออเดอร์แรกในรอบบิลนี้
+            recordDate = new Date(orders[0].created_at);
+          } else {
+            // (เผื่อกรณีแปลกๆ) ถ้าไม่มีออเดอร์แต่ยอด > 0 ให้ใช้ logic เดิม (ปัดเวลา 6 โมง)
+            const now = new Date();
+            if (now.getHours() < 6) {
+               recordDate.setDate(recordDate.getDate() - 1);
+            }
+          }
+
+          // บังคับให้เวลาเป็น 23:59:59 ของวันที่เปิดร้าน (เพื่อให้ยอดไปอยู่ท้ายสุดของวันนั้นใน Report)
+          recordDate.setHours(23, 59, 59, 999);
+
+          await supabase.from("transactions").insert({ 
+            type: 'income', 
+            amount: totalSales, 
+            description: `ยอดขายปิดร้าน (${recordDate.toLocaleDateString('th-TH')})`, 
+            created_at: recordDate.toISOString() 
+          });
+          
+          alert(`บันทึกยอดขาย ${totalSales.toLocaleString()} ฿ แล้ว (ลงวันที่ ${recordDate.toLocaleDateString('th-TH')})`);
+        } else { 
+          alert("ปิดร้านเรียบร้อย (ไม่มียอดขายใหม่)"); 
+        }
+      } catch (e) { 
+        console.error(e); 
+        alert("Error summarizing sales"); 
+      }
+    } else { 
+      alert("เปิดร้านแล้ว"); 
+    }
 
     const newStatus = !isStoreOpen;
     await supabase.from("store_settings").update({ is_open: newStatus }).eq("id", 1);
