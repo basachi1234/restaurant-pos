@@ -3,7 +3,10 @@
 import { useEffect, useState, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
 import Link from "next/link";
-import { ArrowLeft, Printer, CheckCircle, AlertTriangle, ChefHat, TicketPercent, Ban, Coins, QrCode, Banknote, X } from "lucide-react";
+import { 
+  ArrowLeft, Printer, CheckCircle, AlertTriangle, ChefHat, 
+  TicketPercent, Ban, Coins, QrCode, Banknote, X, History, Calendar 
+} from "lucide-react";
 import generatePayload from "promptpay-qr";
 import QRCode from "qrcode";
 
@@ -21,6 +24,8 @@ type OrderDetail = {
   }[];
   total: number;
   pendingCount: number;
+  isReprint?: boolean;
+  promotion_name?: string;
 };
 
 type Discount = {
@@ -49,18 +54,86 @@ export default function CashierPage() {
   const [cashReceived, setCashReceived] = useState<string>("");
   const [currentReceiptNo, setCurrentReceiptNo] = useState<string>("");
 
+  // History State
+  const [showHistoryModal, setShowHistoryModal] = useState(false);
+  const [historyOrders, setHistoryOrders] = useState<any[]>([]);
+  const [historyDate, setHistoryDate] = useState<string>(new Date().toISOString().split('T')[0]);
+
   useEffect(() => {
     fetchStoreInfo();
     fetchOccupiedTables();
     fetchDiscounts();
   }, []);
 
-  // สร้าง QR Code สำหรับใบเสร็จ
   useEffect(() => {
-    if (selectedOrder && promptPayId) {
-       // QR Logic handled below
+    if (showHistoryModal) {
+      fetchHistoryOrders();
     }
-  }, [selectedOrder, promptPayId]);
+  }, [showHistoryModal, historyDate]);
+
+  const calculation = useMemo(() => {
+    if (!selectedOrder) return { subtotal: 0, discount: 0, grandTotal: 0, discountName: "", itemDetails: [] };
+
+    let subtotal = 0;
+    const itemDetails = selectedOrder.items.map(item => {
+      let itemTotal = 0;
+      let note = "";
+
+      if (item.promotion_qty > 0 && item.promotion_price > 0 && item.quantity >= item.promotion_qty) {
+        const bundles = Math.floor(item.quantity / item.promotion_qty);
+        const remainder = item.quantity % item.promotion_qty;
+        const bundleTotal = bundles * item.promotion_price;
+        const remainderTotal = remainder * item.price;
+        itemTotal = bundleTotal + remainderTotal;
+        note = `(โปร ${item.promotion_qty} ชิ้น ${item.promotion_price}฿ x${bundles})`;
+      } else {
+        itemTotal = item.quantity * item.price;
+      }
+
+      subtotal += itemTotal;
+      return { ...item, finalPrice: itemTotal, note };
+    });
+
+    let discount = 0;
+    let discountName = "";
+
+    if (selectedOrder.isReprint) {
+        if (selectedOrder.total < subtotal) {
+            discount = subtotal - selectedOrder.total;
+            discountName = selectedOrder.promotion_name || "ส่วนลด";
+        }
+    } else if (selectedDiscountId) {
+        const discountObj = discounts.find(d => d.id === Number(selectedDiscountId));
+        if (discountObj) {
+            discountName = discountObj.name;
+            if (discountObj.type === 'percent') {
+                discount = subtotal * (discountObj.value / 100);
+            } else {
+                discount = discountObj.value;
+            }
+        }
+    }
+
+    discount = Math.min(discount, subtotal);
+    const grandTotal = Math.max(0, subtotal - discount);
+
+    return { subtotal, discount, grandTotal, discountName, itemDetails };
+  }, [selectedOrder, selectedDiscountId, discounts]);
+
+  useEffect(() => {
+    const genQR = async () => {
+        if (!promptPayId || calculation.grandTotal <= 0) {
+            setQrCodeData("");
+            return;
+        }
+        try {
+            const payload = generatePayload(promptPayId, { amount: calculation.grandTotal });
+            const url = await QRCode.toDataURL(payload);
+            setQrCodeData(url);
+        } catch (err) { console.error("QR Error", err); }
+    };
+    genQR();
+  }, [calculation.grandTotal, promptPayId]);
 
   const fetchStoreInfo = async () => {
     const { data } = await supabase.from("store_settings").select("*").eq("id", 1).single();
@@ -81,6 +154,64 @@ export default function CashierPage() {
     setDiscounts(data || []);
   };
 
+  const fetchHistoryOrders = async () => {
+    const start = new Date(historyDate);
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(historyDate);
+    end.setHours(23, 59, 59, 999);
+
+    const { data } = await supabase
+      .from("orders")
+      .select("id, receipt_no, total_price, created_at, tables(label)")
+      .eq("status", "completed")
+      .gte("created_at", start.toISOString())
+      .lte("created_at", end.toISOString())
+      .order("created_at", { ascending: false });
+
+    setHistoryOrders(data || []);
+  };
+
+  const handleSelectHistoryOrder = async (orderId: string, receiptNo: string) => {
+    const { data: order } = await supabase.from("orders").select(`
+      id, total_price, promotion_name,
+      tables ( label, id ),
+      order_items ( 
+        quantity, status, 
+        menu_items ( name, price, promotion_qty, promotion_price ) 
+      )
+    `).eq("id", orderId).single();
+
+    if (!order) return;
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const items = order.order_items.map((i: any) => ({
+      name: i.menu_items?.name || "Unknown",
+      price: i.menu_items?.price || 0,
+      quantity: i.quantity,
+      status: i.status,
+      promotion_qty: i.menu_items?.promotion_qty || 0,
+      promotion_price: i.menu_items?.promotion_price || 0
+    }));
+
+    setSelectedOrder({
+      order_id: order.id,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      table_label: (order.tables as any)?.label || "Takeaway",
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      table_id: (order.tables as any)?.id || 0,
+      items,
+      total: order.total_price,
+      pendingCount: 0,
+      isReprint: true,
+      promotion_name: order.promotion_name
+    });
+
+    setCurrentReceiptNo(receiptNo || "-");
+    setShowHistoryModal(false);
+    setSelectedDiscountId(""); 
+    setPaymentMethod('transfer'); 
+  };
+
   const handleSelectTable = async (tableId: number, tableLabel: string) => {
     const { data: order } = await supabase.from("orders").select(`
       id, order_items ( 
@@ -90,7 +221,6 @@ export default function CashierPage() {
     `).eq("table_id", tableId).eq("status", "active").single();
 
     if (!order) {
-        // Force Reset Logic
         const confirmReset = confirm(`⚠️ ไม่พบข้อมูลบิลของโต๊ะ ${tableLabel} (แต่สถานะโต๊ะขึ้นว่าไม่ว่าง)\n\nระบบตรวจพบข้อมูลผิดปกติ ต้องการ "รีเซ็ตโต๊ะให้ว่าง" เพื่อแก้ไขปัญหาหรือไม่?`);
         if (confirmReset) {
             await supabase.from("tables").update({ status: "available" }).eq("id", tableId);
@@ -128,20 +258,17 @@ export default function CashierPage() {
 
     const items = Array.from(itemMap.values());
 
-    // Gen เลขใบเสร็จรอไว้แสดงผล (ชั่วคราว)
     const now = new Date();
     const label = tableLabel.toUpperCase();
     const isTakeaway = label.startsWith("TA") || label.startsWith("A");
     const numPart = label.replace(/\D/g, '').padStart(2, '0');
     const prefix = isTakeaway ? 'A' : 'T';
-    // มี REC- และขีดคั่น ทำให้ยาว
     const tempReceiptNo = `REC-${now.getFullYear().toString().substr(-2)}${(now.getMonth()+1).toString().padStart(2,'0')}${now.getDate().toString().padStart(2,'0')}-${now.getHours().toString().padStart(2,'0')}${now.getMinutes().toString().padStart(2,'0')}-${prefix}${numPart}`;
     
     setCurrentReceiptNo(tempReceiptNo);
-
     setSelectedDiscountId("");
     setCashReceived("");
-    setPaymentMethod("transfer"); // ✅ รีเซ็ตเป็นโอนจ่าย (เพื่อให้ QR ขึ้นเป็นค่าเริ่มต้น)
+    setPaymentMethod("transfer"); 
     
     setSelectedOrder({
       order_id: order.id,
@@ -150,77 +277,16 @@ export default function CashierPage() {
       items,
       total: 0,
       pendingCount,
+      isReprint: false
     });
   };
 
-  const calculation = useMemo(() => {
-    if (!selectedOrder) return { subtotal: 0, discount: 0, grandTotal: 0, discountName: "", itemDetails: [] };
-
-    let subtotal = 0;
-    const itemDetails = selectedOrder.items.map(item => {
-      let itemTotal = 0;
-      let note = "";
-
-      if (item.promotion_qty > 0 && item.promotion_price > 0 && item.quantity >= item.promotion_qty) {
-        const bundles = Math.floor(item.quantity / item.promotion_qty);
-        const remainder = item.quantity % item.promotion_qty;
-        const bundleTotal = bundles * item.promotion_price;
-        const remainderTotal = remainder * item.price;
-        itemTotal = bundleTotal + remainderTotal;
-        note = `(โปร ${item.promotion_qty} ชิ้น ${item.promotion_price}฿ x${bundles})`;
-      } else {
-        itemTotal = item.quantity * item.price;
-      }
-
-      subtotal += itemTotal;
-      return { ...item, finalPrice: itemTotal, note };
-    });
-
-    let discount = 0;
-    let discountName = "";
-
-    if (selectedDiscountId) {
-      const discountObj = discounts.find(d => d.id === Number(selectedDiscountId));
-      if (discountObj) {
-        discountName = discountObj.name;
-        if (discountObj.type === 'percent') {
-          discount = subtotal * (discountObj.value / 100);
-        } else {
-          discount = discountObj.value;
-        }
-      }
-    }
-
-    discount = Math.min(discount, subtotal);
-    const grandTotal = Math.max(0, subtotal - discount);
-
-    return { subtotal, discount, grandTotal, discountName, itemDetails };
-  }, [selectedOrder, selectedDiscountId, discounts]);
-
-  // QR Code Generator
-  useEffect(() => {
-    const genQR = async () => {
-        if (!promptPayId || calculation.grandTotal <= 0) {
-            setQrCodeData("");
-            return;
-        }
-        try {
-            const payload = generatePayload(promptPayId, { amount: calculation.grandTotal });
-            const url = await QRCode.toDataURL(payload);
-            setQrCodeData(url);
-        } catch (err) { console.error("QR Error", err); }
-    };
-    genQR();
-  }, [calculation.grandTotal, promptPayId]);
-
-  // คำนวณเงินทอน
   const changeAmount = useMemo(() => {
     const received = parseFloat(cashReceived);
     if (isNaN(received)) return 0;
     return Math.max(0, received - calculation.grandTotal);
   }, [cashReceived, calculation.grandTotal]);
 
-  // ฟังก์ชัน Void
   const handleVoidBill = async () => {
     if (!selectedOrder) return;
     const confirmVoid = confirm(`⚠️ ยืนยัน "ยกเลิกโต๊ะ (Void)" ใช่หรือไม่?`);
@@ -240,7 +306,6 @@ export default function CashierPage() {
     setShowPaymentModal(true);
   };
 
-  // ✅ ฟังก์ชันยืนยันรับเงิน
   const handleConfirmPayment = async () => {
     if (!selectedOrder) return;
 
@@ -251,7 +316,6 @@ export default function CashierPage() {
         }
     }
 
-    // --- สร้างเลขที่ใบเสร็จแบบใหม่ ---
     const now = new Date();
     const yy = now.getFullYear().toString().substr(-2);
     const mm = (now.getMonth() + 1).toString().padStart(2, '0');
@@ -263,17 +327,11 @@ export default function CashierPage() {
     const numPart = label.replace(/\D/g, '').padStart(2, '0'); 
     
     let prefix = 'T'; 
-    if (label.startsWith("TA") || label.startsWith("A")) {
-        prefix = 'A'; 
-    }
+    if (label.startsWith("TA") || label.startsWith("A")) prefix = 'A'; 
 
     const payPart = paymentMethod === 'cash' ? '1' : '2';
-
-    // Format: YYMMDDHHMM + [T/A]XX + Pay
     const receiptNo = `${yy}${mm}${dd}${hh}${min}${prefix}${numPart}${payPart}`;
-    // -----------------------------
 
-    // Update DB
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const updatePayload: any = { 
         status: "completed", 
@@ -289,16 +347,11 @@ export default function CashierPage() {
     await supabase.from("orders").update(updatePayload).eq("id", selectedOrder.order_id);
     await supabase.from("tables").update({ status: "available" }).eq("id", selectedOrder.table_id);
 
-    // อัปเดตเลขใบเสร็จบนหน้าจอเพื่อเตรียมพิมพ์
     setCurrentReceiptNo(receiptNo);
     setShowPaymentModal(false);
 
-    // สั่งพิมพ์ทันที
-    setTimeout(() => {
-        window.print();
-    }, 100);
+    setTimeout(() => { window.print(); }, 100);
 
-    // รอให้หน้าต่างพิมพ์ขึ้นก่อน แล้วค่อยเคลียร์
     setTimeout(() => {
         alert(`✅ ปิดบิลเรียบร้อย!\nเลขที่ใบเสร็จ: ${receiptNo}\nเงินทอน: ${changeAmount.toLocaleString()} ฿`);
         setSelectedOrder(null);
@@ -306,19 +359,40 @@ export default function CashierPage() {
     }, 1000);
   };
 
+  const minDate = useMemo(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 30);
+    return d.toISOString().split('T')[0];
+  }, []);
+
+  const maxDate = new Date().toISOString().split('T')[0];
+
   return (
     <div className="min-h-screen bg-gray-100 p-6 flex flex-col md:flex-row gap-6">
       
-      {/* Left: Tables */}
+      {/* Left: Tables & History Button */}
       <div className="w-full md:w-1/3 print:hidden">
-        <div className="mb-6 flex items-center gap-4">
-          <Link href="/" className="bg-gray-200 p-2 rounded hover:bg-gray-300"><ArrowLeft /></Link>
-          <h1 className="text-2xl font-bold">💵 แคชเชียร์</h1>
+        <div className="mb-6 flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <Link href="/" className="bg-gray-200 p-2 rounded hover:bg-gray-300"><ArrowLeft /></Link>
+            <h1 className="text-2xl font-bold">💵 แคชเชียร์</h1>
+          </div>
+          <button 
+            onClick={() => setShowHistoryModal(true)}
+            className="bg-gray-800 text-white px-3 py-2 rounded-lg text-sm flex items-center gap-2 hover:bg-gray-700 shadow-sm"
+          >
+            <History size={16} /> ประวัติบิล
+          </button>
         </div>
+
         <div className="grid gap-3">
           {occupiedTables.length === 0 && <p className="text-gray-500 text-center py-10">ไม่มีลูกค้าในร้าน</p>}
           {occupiedTables.map((t) => (
-            <button key={t.id} onClick={() => handleSelectTable(t.id, t.label)} className={`p-4 rounded-xl text-left shadow-sm border-2 transition-all ${selectedOrder?.table_id === t.id ? "border-blue-500 bg-blue-50" : "bg-white border-transparent"}`}>
+            <button 
+              key={t.id} 
+              onClick={() => handleSelectTable(t.id, t.label)} 
+              className={`p-4 rounded-xl text-left shadow-sm border-2 transition-all ${selectedOrder?.table_id === t.id && !selectedOrder?.isReprint ? "border-blue-500 bg-blue-50" : "bg-white border-transparent"}`}
+            >
               <div className="font-bold text-lg">โต๊ะ {t.label}</div>
               <div className="text-red-500 text-sm animate-pulse">● กำลังทาน...</div>
             </button>
@@ -330,12 +404,19 @@ export default function CashierPage() {
       <div className="w-full md:w-2/3 bg-white rounded-xl shadow-lg p-8 relative min-h-[500px] flex flex-col">
         {selectedOrder ? (
           <>
+            {selectedOrder.isReprint && (
+               <div className="absolute top-4 right-4 bg-gray-100 text-gray-500 px-3 py-1 rounded-full text-xs font-bold print:hidden">
+                 โหมดดูย้อนหลัง
+               </div>
+            )}
+
             <div className="flex-1">
               <div id="receipt-area" className="max-w-[350px] mx-auto border p-6 text-sm bg-white mb-6 print:border-none print:w-full print:max-w-none print:p-0 print:m-0">
                 <div className="text-center mb-4">
                   {shopLogo && <img src={shopLogo} className="h-16 mx-auto mb-2 object-contain" alt="Logo" />}
                   <div className="font-bold text-xl mb-1">{shopName}</div>
                   <div className="text-xs text-gray-500 print:text-black">ใบเสร็จรับเงิน / Receipt</div>
+                  {selectedOrder.isReprint && <div className="text-xs font-bold mt-1">(สำเนา / Copy)</div>}
                   <div className="text-xs text-gray-500 mt-1 print:text-black">
                     <div>เลขที่: {currentReceiptNo}</div>
                     <div>โต๊ะ: {selectedOrder.table_label} | วันที่: {new Date().toLocaleDateString('th-TH')}</div>
@@ -377,8 +458,7 @@ export default function CashierPage() {
                     <span>{calculation.grandTotal.toLocaleString()} ฿</span>
                   </div>
                   
-                  {/* แสดงเงินทอนในใบเสร็จด้วย (ถ้าจ่ายสด) */}
-                  {paymentMethod === 'cash' && cashReceived && (
+                  {!selectedOrder.isReprint && paymentMethod === 'cash' && cashReceived && (
                     <div className="text-xs text-gray-500 mt-2 print:block hidden">
                         <div className="flex justify-between"><span>รับเงินสด:</span><span>{parseFloat(cashReceived).toLocaleString()}</span></div>
                         <div className="flex justify-between"><span>เงินทอน:</span><span>{changeAmount.toLocaleString()}</span></div>
@@ -387,8 +467,7 @@ export default function CashierPage() {
                 </div>
 
                 <div className="mt-8 text-center">
-                  {/* ✅ เงื่อนไข: แสดง QR Code เฉพาะยอด > 0 และ ไม่ได้เลือกจ่ายเงินสด */}
-                  {calculation.grandTotal > 0 && qrCodeData && paymentMethod !== 'cash' && (
+                  {calculation.grandTotal > 0 && qrCodeData && paymentMethod !== 'cash' && !selectedOrder.isReprint && (
                     <div className="flex flex-col items-center">
                         <img src={qrCodeData} alt="PromptPay QR" className="w-32 h-32 border p-2 rounded mb-2" />
                         <p className="text-[10px] text-gray-500">สแกนจ่ายได้ทันที</p>
@@ -399,23 +478,25 @@ export default function CashierPage() {
               </div>
             </div>
 
-            <div className="print:hidden bg-gray-50 p-4 rounded-xl border border-gray-200 mb-6">
-              <div className="flex items-center gap-2 mb-3 text-gray-700 font-bold">
-                <TicketPercent size={20} className="text-orange-500" /> โปรโมชั่นส่วนลดท้ายบิล
+            {!selectedOrder.isReprint && (
+              <div className="print:hidden bg-gray-50 p-4 rounded-xl border border-gray-200 mb-6">
+                <div className="flex items-center gap-2 mb-3 text-gray-700 font-bold">
+                  <TicketPercent size={20} className="text-orange-500" /> โปรโมชั่นส่วนลดท้ายบิล
+                </div>
+                <select
+                  value={selectedDiscountId}
+                  onChange={(e) => setSelectedDiscountId(Number(e.target.value) || "")}
+                  className="w-full border p-3 rounded-lg text-gray-700 outline-none focus:ring-2 focus:ring-orange-200 bg-white"
+                >
+                  <option value="">-- ไม่ใช้ส่วนลด --</option>
+                  {discounts.map(d => (
+                    <option key={d.id} value={d.id}>
+                      {d.name} ({d.type === 'percent' ? `ลด ${d.value}%` : `ลด ${d.value} บาท`})
+                    </option>
+                  ))}
+                </select>
               </div>
-              <select
-                value={selectedDiscountId}
-                onChange={(e) => setSelectedDiscountId(Number(e.target.value) || "")}
-                className="w-full border p-3 rounded-lg text-gray-700 outline-none focus:ring-2 focus:ring-orange-200 bg-white"
-              >
-                <option value="">-- ไม่ใช้ส่วนลด --</option>
-                {discounts.map(d => (
-                  <option key={d.id} value={d.id}>
-                    {d.name} ({d.type === 'percent' ? `ลด ${d.value}%` : `ลด ${d.value} บาท`})
-                  </option>
-                ))}
-              </select>
-            </div>
+            )}
 
             {selectedOrder.pendingCount > 0 && (
               <div className="bg-red-50 border-l-4 border-red-500 text-red-700 p-4 mb-4 rounded mx-auto max-w-md print:hidden flex items-center gap-3">
@@ -428,35 +509,35 @@ export default function CashierPage() {
             )}
 
             <div className="flex flex-wrap gap-4 justify-center print:hidden pt-4 border-t">
-              {/* ปุ่มนี้แค่ Print ดูเฉยๆ ไม่ปิดบิล */}
               <button
                 onClick={() => window.print()}
                 className="bg-gray-800 text-white px-6 py-3 rounded-lg flex gap-2 font-bold hover:bg-black transition-colors"
               >
-                <Printer /> พิมพ์ใบเสร็จ (ดูตัวอย่าง)
+                <Printer /> {selectedOrder.isReprint ? "พิมพ์ใบเสร็จซ้ำ" : "พิมพ์ใบเสร็จ (ตัวอย่าง)"}
               </button>
 
-              {/* ปุ่มชำระเงิน (เปิด Modal) หรือ Void */}
-              <button
-                onClick={calculation.grandTotal === 0 ? handleVoidBill : handleOpenPayment}
-                disabled={selectedOrder.pendingCount > 0}
-                className={`
-                  px-6 py-3 rounded-lg flex gap-2 font-bold transition-all shadow-lg
-                  ${selectedOrder.pendingCount > 0
-                    ? "bg-gray-300 text-gray-500 cursor-not-allowed"
+              {!selectedOrder.isReprint && (
+                <button
+                  onClick={calculation.grandTotal === 0 ? handleVoidBill : handleOpenPayment}
+                  disabled={selectedOrder.pendingCount > 0}
+                  className={`
+                    px-6 py-3 rounded-lg flex gap-2 font-bold transition-all shadow-lg
+                    ${selectedOrder.pendingCount > 0
+                      ? "bg-gray-300 text-gray-500 cursor-not-allowed"
+                      : calculation.grandTotal === 0
+                        ? "bg-red-600 text-white hover:bg-red-700 hover:scale-105"
+                        : "bg-green-600 text-white hover:bg-green-700 hover:scale-105"
+                    }
+                  `}
+                >
+                  {selectedOrder.pendingCount > 0
+                    ? (<><ChefHat /> รอครัว...</>)
                     : calculation.grandTotal === 0
-                      ? "bg-red-600 text-white hover:bg-red-700 hover:scale-105" // Void
-                      : "bg-green-600 text-white hover:bg-green-700 hover:scale-105" // Pay
+                      ? (<><Ban /> ยกเลิกโต๊ะ (Void)</>)
+                      : (<><CheckCircle /> ชำระเงิน / ปิดบิล</>)
                   }
-                `}
-              >
-                {selectedOrder.pendingCount > 0
-                  ? (<><ChefHat /> รอครัว...</>)
-                  : calculation.grandTotal === 0
-                    ? (<><Ban /> ยกเลิกโต๊ะ (Void)</>)
-                    : (<><CheckCircle /> ชำระเงิน / ปิดบิล</>)
-                }
-              </button>
+                </button>
+              )}
             </div>
           </>
         ) : (
@@ -467,7 +548,7 @@ export default function CashierPage() {
         )}
       </div>
 
-      {/* ✅ Payment Modal */}
+      {/* Payment Modal */}
       {showPaymentModal && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm print:hidden">
             <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
@@ -528,6 +609,77 @@ export default function CashierPage() {
                     </button>
                 </div>
             </div>
+        </div>
+      )}
+
+      {/* History Modal */}
+      {showHistoryModal && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm print:hidden">
+          <div className="bg-white rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 flex flex-col max-h-[80vh]">
+            <div className="bg-gray-800 text-white p-4 flex justify-between items-center">
+              <h3 className="font-bold text-lg flex items-center gap-2"><History className="text-yellow-400" /> ประวัติการขาย</h3>
+              <button onClick={() => setShowHistoryModal(false)} className="hover:bg-white/20 p-1 rounded-full"><X size={20} /></button>
+            </div>
+            
+            <div className="p-4 bg-gray-100 border-b flex items-center gap-3">
+               <Calendar className="text-gray-500" />
+               <span className="font-bold text-gray-700">เลือกวันที่:</span>
+               <input 
+                 type="date" 
+                 value={historyDate}
+                 onChange={(e) => setHistoryDate(e.target.value)}
+                 max={maxDate}
+                 min={minDate} 
+                 className="p-2 border rounded-lg shadow-sm font-medium focus:ring-2 focus:ring-blue-500 outline-none"
+               />
+               <span className="text-xs text-gray-400 ml-auto">(ย้อนหลังได้ 30 วัน)</span>
+            </div>
+
+            <div className="p-0 overflow-y-auto flex-1">
+              {historyOrders.length === 0 ? (
+                <div className="text-center py-10 text-gray-400 flex flex-col items-center">
+                    <div className="text-4xl mb-2">📅</div>
+                    <p>ไม่พบรายการขายในวันที่เลือก</p>
+                </div>
+              ) : (
+                <table className="w-full text-left border-collapse">
+                  <thead className="bg-gray-100 text-gray-600 sticky top-0 shadow-sm z-10">
+                    <tr>
+                      <th className="p-3 border-b text-sm">เวลา</th>
+                      <th className="p-3 border-b text-sm">เลขใบเสร็จ</th>
+                      <th className="p-3 border-b text-sm">โต๊ะ</th>
+                      <th className="p-3 border-b text-right text-sm">ยอดเงิน</th>
+                      <th className="p-3 border-b"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+                    {historyOrders.map((h: any) => (
+                      <tr key={h.id} className="hover:bg-blue-50 border-b last:border-none transition-colors">
+                        <td className="p-3 text-sm text-gray-600">{new Date(h.created_at).toLocaleTimeString('th-TH', {hour: '2-digit', minute:'2-digit'})}</td>
+                        <td className="p-3 font-mono text-sm font-bold text-gray-800">{h.receipt_no || "-"}</td>
+                        {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+                        <td className="p-3 text-sm">{(h.tables as any)?.label || "Takeaway"}</td>
+                        <td className="p-3 text-right font-bold text-green-700">{h.total_price.toLocaleString()}</td>
+                        <td className="p-3 text-right">
+                          <button 
+                            onClick={() => handleSelectHistoryOrder(h.id, h.receipt_no)}
+                            className="bg-blue-100 text-blue-700 px-3 py-1 rounded-full text-xs font-bold hover:bg-blue-200 transition-colors"
+                          >
+                            ดู / พิมพ์
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+            
+            <div className="bg-gray-50 p-2 text-center text-xs text-gray-400 border-t">
+               แสดงรายการขายของวันที่ {new Date(historyDate).toLocaleDateString('th-TH')}
+            </div>
+          </div>
         </div>
       )}
 
