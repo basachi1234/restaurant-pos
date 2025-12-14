@@ -1,69 +1,91 @@
 "use client";
 
 import { useState } from "react";
+import { login } from "@/app/actions";
 import { useRouter } from "next/navigation";
-import { Lock, User, Loader2 } from "lucide-react";
-import { login } from "../actions"; // ✅ เรียกใช้ login action แทน
+import { Lock, Delete, Loader2 } from "lucide-react";
 
 export default function LoginPage() {
-    const [password, setPassword] = useState("");
-    const [loading, setLoading] = useState(false);
-    // const router = useRouter(); // ไม่ได้ใช้ ลบออกได้
+  const [pin, setPin] = useState("");
+  const [loading, setLoading] = useState(false);
+  const router = useRouter();
 
-    const handleLogin = async (e: React.FormEvent) => {
-        e.preventDefault();
-        setLoading(true);
+  const handleNumClick = (num: string) => {
+    if (pin.length < 6) {
+      const newPin = pin + num;
+      setPin(newPin);
+      if (newPin.length === 6) { // ตั้งค่าความยาว PIN ตามต้องการ (เช่น 4 หรือ 6)
+        handleLogin(newPin);
+      }
+    }
+  };
 
-        try {
-            // ✅ เรียก Server Action เพื่อ Login และฝัง HttpOnly Cookie
-            const result = await login(password);
+  const handleClear = () => setPin("");
+  const handleDelete = () => setPin(prev => prev.slice(0, -1));
 
-            if (result.success) {
-                // บังคับโหลดหน้าใหม่เพื่อเข้าสู่ระบบ (Middleware จะปล่อยผ่านเพราะมี Cookie แล้ว)
-                window.location.href = "/";
-            } else {
-                alert(result.message || "รหัสผ่านไม่ถูกต้อง");
-                setPassword("");
-                setLoading(false);
-            }
-        } catch (err) {
-            console.error(err);
-            alert("เกิดข้อผิดพลาด");
-            setLoading(false);
-        }
-    };
+  const handleLogin = async (currentPin: string) => {
+    setLoading(true);
+    // เรียก Server Action ที่เราแก้ไป
+    const res = await login(currentPin);
+    
+    if (res.success) {
+      router.push("/"); // Login ผ่าน -> ไปหน้าแรก
+    } else {
+      alert("❌ รหัสผิดครับพี่! ลองใหม่นะ");
+      setPin("");
+      setLoading(false);
+    }
+  };
 
-    return (
-        <div className="min-h-screen flex items-center justify-center bg-gray-800 p-4">
-            <form onSubmit={handleLogin} className="bg-white p-8 rounded-2xl shadow-2xl w-full max-w-sm text-center">
-                <div className="bg-blue-100 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-6">
-                    <Lock className="text-blue-600 w-8 h-8" />
-                </div>
-
-                <h1 className="text-2xl font-bold text-gray-800 mb-2">เข้าสู่ระบบร้าน</h1>
-                <p className="text-gray-500 mb-6 text-sm">กรุณากรอกรหัส PIN ส่วนตัว</p>
-
-                <div className="relative mb-6">
-                    <User className="absolute left-3 top-3 text-gray-400 w-5 h-5" />
-                    <input
-                        type="password"
-                        value={password}
-                        onChange={(e) => setPassword(e.target.value)}
-                        className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all text-center text-lg tracking-widest font-bold"
-                        placeholder="PIN"
-                        autoFocus
-                        disabled={loading}
-                    />
-                </div>
-
-                <button
-                    type="submit"
-                    disabled={loading}
-                    className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl transition-all active:scale-95 shadow-lg flex items-center justify-center gap-2"
-                >
-                    {loading ? <Loader2 className="animate-spin" /> : "เข้าใช้งาน"}
-                </button>
-            </form>
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-gray-100 p-4">
+      <div className="bg-white p-8 rounded-3xl shadow-xl w-full max-w-sm flex flex-col items-center">
+        
+        <div className="bg-blue-100 p-4 rounded-full mb-4 text-blue-600">
+          <Lock size={32} />
         </div>
-    );
+        
+        <h1 className="text-2xl font-bold text-gray-800 mb-2">เข้าสู่ระบบ</h1>
+        <p className="text-gray-500 mb-8 text-sm">กรุณากดรหัสพนักงาน (PIN)</p>
+
+        {/* ช่องแสดงผล PIN (เป็นจุดๆ) */}
+        <div className="flex gap-4 mb-8 h-12 justify-center items-center">
+          {[...Array(6)].map((_, i) => (
+            <div 
+              key={i} 
+              className={`w-4 h-4 rounded-full transition-all duration-200 ${
+                i < pin.length ? "bg-blue-600 scale-125" : "bg-gray-200"
+              }`}
+            />
+          ))}
+        </div>
+
+        {/* Numpad Grid */}
+        <div className="grid grid-cols-3 gap-4 w-full mb-6">
+          {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((num) => (
+            <button
+              key={num}
+              onClick={() => handleNumClick(num.toString())}
+              disabled={loading}
+              className="h-16 rounded-2xl bg-gray-50 hover:bg-gray-100 active:bg-blue-50 border border-gray-100 text-2xl font-bold text-gray-700 transition-colors shadow-sm disabled:opacity-50"
+            >
+              {num}
+            </button>
+          ))}
+          
+          <button onClick={handleClear} disabled={loading} className="h-16 rounded-2xl text-red-500 font-bold hover:bg-red-50 transition-colors">C</button>
+          <button onClick={() => handleNumClick("0")} disabled={loading} className="h-16 rounded-2xl bg-gray-50 border border-gray-100 text-2xl font-bold text-gray-700 hover:bg-gray-100 shadow-sm">0</button>
+          <button onClick={handleDelete} disabled={loading} className="h-16 rounded-2xl flex items-center justify-center text-gray-500 hover:bg-gray-100 hover:text-gray-800 transition-colors">
+            <Delete size={24} />
+          </button>
+        </div>
+
+        {loading && (
+           <div className="flex items-center gap-2 text-blue-600 animate-pulse">
+             <Loader2 className="animate-spin" /> กำลังตรวจสอบ...
+           </div>
+        )}
+      </div>
+    </div>
+  );
 }

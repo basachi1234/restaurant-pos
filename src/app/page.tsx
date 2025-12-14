@@ -18,7 +18,9 @@ type Table = {
 export default function Home() {
   const [tables, setTables] = useState<Table[]>([]);
   const [isStoreOpen, setIsStoreOpen] = useState(true);
-  const [userRole, setUserRole] = useState<string | undefined>(undefined);
+  
+  // ✅ แก้ไข: เปลี่ยนให้รองรับ null ได้ (เพื่อแก้บั๊ก Argument of type 'null'...)
+  const [userRole, setUserRole] = useState<string | null>(null);
 
   // Store Info
   const [shopName, setShopName] = useState("ร้านอาหาร");
@@ -29,17 +31,31 @@ export default function Home() {
   useEffect(() => {
     // ✅ 1. เรียก Server Action เพื่อเช็ค Role
     const checkUser = async () => {
-      const session = await getSession();
-      setUserRole(session.role);
+      try {
+        const session = await getSession();
+        // ถ้า session.role เป็น undefined หรือ null ก็จะเก็บเป็น null หรือค่าที่ส่งมา
+        setUserRole(session.role || null); 
+      } catch (err) {
+        console.error("Error checking session:", err);
+      }
     };
     checkUser();
 
     fetchData();
 
-    const channelTables = supabase.channel("realtime-tables").on("postgres_changes", { event: "*", schema: "public", table: "tables" }, () => fetchData()).subscribe();
-    const channelSettings = supabase.channel("realtime-settings").on("postgres_changes", { event: "*", schema: "public", table: "store_settings" }, () => fetchData()).subscribe();
+    // Realtime Subscriptions
+    const channelTables = supabase.channel("realtime-tables")
+      .on("postgres_changes", { event: "*", schema: "public", table: "tables" }, () => fetchData())
+      .subscribe();
+      
+    const channelSettings = supabase.channel("realtime-settings")
+      .on("postgres_changes", { event: "*", schema: "public", table: "store_settings" }, () => fetchData())
+      .subscribe();
 
-    return () => { supabase.removeChannel(channelTables); supabase.removeChannel(channelSettings); };
+    return () => { 
+      supabase.removeChannel(channelTables); 
+      supabase.removeChannel(channelSettings); 
+    };
   }, []);
 
   const fetchData = async () => {
@@ -50,22 +66,29 @@ export default function Home() {
     if (settings) {
       setIsStoreOpen(settings.is_open);
       setShopName(settings.shop_name || "ร้านอาหาร");
-      setShopLogo(settings.shop_logo_url);
+      setShopLogo(settings.shop_logo_url || null); // ✅ ใส่ || null กันเหนียว
     }
   };
 
   // ✅ 2. ใช้ Server Action สำหรับ Logout
   const handleLogout = async () => {
     await logout();
-    window.location.href = "/login";
+    window.location.href = "/login"; // ใช้ window.location เพื่อบังคับโหลดหน้าใหม่และเคลียร์ state
   };
 
   const handleTableClick = async (table: Table) => {
-    // ... (ส่วนนี้เหมือนเดิม) ...
-    if (!isStoreOpen) { alert("⛔ ร้านปิดอยู่ครับ ไม่สามารถเปิดบิลใหม่ได้"); return; }
+    if (!isStoreOpen) { 
+      alert("⛔ ร้านปิดอยู่ครับ ไม่สามารถเปิดบิลใหม่ได้"); 
+      return; 
+    }
 
+    // เช็คสถานะร้านล่าสุดอีกครั้งกันพลาด
     const { data: settings } = await supabase.from("store_settings").select("is_open").eq("id", 1).single();
-    if (settings && settings.is_open === false) { alert("⛔ ร้านปิดอยู่ครับ"); setIsStoreOpen(false); return; }
+    if (settings && settings.is_open === false) { 
+      alert("⛔ ร้านปิดอยู่ครับ"); 
+      setIsStoreOpen(false); 
+      return; 
+    }
 
     if (table.status === "available") {
       const type = table.label.startsWith("TA") ? "สั่งกลับบ้าน (Takeaway)" : "โต๊ะ";
@@ -73,22 +96,49 @@ export default function Home() {
       if (!confirmOpen) return;
 
       try {
-        const { data: newOrder, error: orderError } = await supabase.from("orders").insert({ table_id: table.id, status: "active" }).select().single();
+        // สร้าง Order ใหม่
+        const { data: newOrder, error: orderError } = await supabase
+          .from("orders")
+          .insert({ table_id: table.id, status: "active" })
+          .select()
+          .single();
+          
         if (orderError) throw orderError;
-        const { error: tableError } = await supabase.from("tables").update({ status: "occupied" }).eq("id", table.id);
+        
+        // อัปเดตสถานะโต๊ะ
+        const { error: tableError } = await supabase
+          .from("tables")
+          .update({ status: "occupied" })
+          .eq("id", table.id);
+          
         if (tableError) throw tableError;
+        
         router.push(`/order/${newOrder.id}`);
-      } catch (error) { console.error("Error opening table:", error); alert("เกิดข้อผิดพลาด"); }
+      } catch (error) { 
+        console.error("Error opening table:", error); 
+        alert("เกิดข้อผิดพลาดในการเปิดบิล"); 
+      }
     } else {
-      const { data: activeOrder } = await supabase.from("orders").select("id").eq("table_id", table.id).eq("status", "active").single();
-      if (activeOrder) router.push(`/order/${activeOrder.id}`); else alert("ไม่พบข้อมูลออเดอร์");
+      // โต๊ะไม่ว่าง -> หา Order ปัจจุบันเพื่อเข้าหน้าสั่งอาหาร
+      const { data: activeOrder } = await supabase
+        .from("orders")
+        .select("id")
+        .eq("table_id", table.id)
+        .eq("status", "active")
+        .single();
+        
+      if (activeOrder) {
+        router.push(`/order/${activeOrder.id}`);
+      } else {
+        alert("ไม่พบข้อมูลออเดอร์ (อาจเกิดข้อผิดพลาดของข้อมูล)");
+      }
     }
   };
 
   const takeawayTables = tables.filter(t => t.label.startsWith("TA"));
   const dineInTables = tables.filter(t => !t.label.startsWith("TA"));
 
-  // ... (ส่วน Render TableButton เหมือนเดิม) ...
+  // Component ย่อยสำหรับปุ่มโต๊ะ
   const TableButton = ({ table, isTakeaway = false }: { table: Table, isTakeaway?: boolean }) => (
     <button
       onClick={() => handleTableClick(table)}
@@ -137,7 +187,7 @@ export default function Home() {
           </Link>
 
           {/* 2. ปุ่มพิเศษสำหรับ Owner เท่านั้น (Cashier + Admin) */}
-          {(userRole === 'owner') && (
+          {userRole === 'owner' && (
             <>
               <Link href="/cashier" className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-bold shadow-md flex items-center gap-2 transition-transform hover:scale-105">
                 💵 แคชเชียร์
