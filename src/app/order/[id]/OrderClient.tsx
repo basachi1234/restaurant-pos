@@ -3,16 +3,9 @@
 import { useState, useMemo, useCallback, memo, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image"; 
-import { ShoppingCart, ArrowLeft, Plus, Minus, Receipt, X, Clock, Trash2, MessageSquare, Scale, Utensils, ChevronRight } from "lucide-react"; 
+import { ShoppingCart, ArrowLeft, Plus, Minus, Receipt, X, Clock, Trash2, MessageSquare, Scale, Utensils, Banknote } from "lucide-react"; // ✅ เพิ่ม Banknote
 import { supabase } from "@/lib/supabase";
 import { MenuItem, Category } from "@/lib/types";
-
-// --- Helper ---
-const getCookie = (name: string): string | undefined => {
-  if (typeof document === 'undefined') return undefined;
-  const match = document.cookie.match(new RegExp('(^| )' + name + '=([^;]+)'));
-  return match ? match[2] : undefined;
-};
 
 type CartItem = MenuItem & { quantity: number; note: string };
 
@@ -149,12 +142,16 @@ export default function OrderClient({
   initialMenuItems, 
   categories, 
   orderId, 
-  tableLabel 
+  tableLabel,
+  tableId, // ✅ รับ Table ID
+  userRole // ✅ รับ userRole จาก Server Component
 }: { 
   initialMenuItems: MenuItem[], 
   categories: Category[], 
   orderId: string, 
-  tableLabel: string 
+  tableLabel: string,
+  tableId: number,
+  userRole: string 
 }) {
   const router = useRouter();
   
@@ -166,7 +163,6 @@ export default function OrderClient({
   const scrollToCategory = (catId: number) => {
     const element = document.getElementById(`cat-${catId}`);
     if (element) {
-        // Offset for sticky header
         const y = element.getBoundingClientRect().top + window.scrollY - 130;
         window.scrollTo({top: y, behavior: 'smooth'});
     }
@@ -176,12 +172,7 @@ export default function OrderClient({
   const [historyItems, setHistoryItems] = useState<OrderHistoryItem[]>([]);
   const [historyTotal, setHistoryTotal] = useState(0);
   
-  const [userRole, setUserRole] = useState<string | undefined>(undefined);
   const audioRef = useRef<HTMLAudioElement | null>(null);
-
-  useEffect(() => {
-    setUserRole(getCookie('user_role'));
-  }, []);
 
   const cartQtyMap = useMemo(() => {
     return cart.reduce((acc, item) => {
@@ -312,6 +303,7 @@ export default function OrderClient({
   const handleDeleteHistoryItem = async (itemId: number, status: string, itemName: string) => {
     const isServed = status === 'served';
 
+    // ✅ ใช้ userRole ที่รับมาจาก Props เพื่อตรวจสอบสิทธิ์
     if (isServed && userRole === 'staff') {
       alert("⛔ ขออภัย: พนักงานไม่สามารถลบรายการที่ 'เสิร์ฟแล้ว' ได้\n(กรุณาแจ้ง Owner หากต้องการ Void บิล)");
       return;
@@ -347,9 +339,22 @@ export default function OrderClient({
             {tableLabel ? `โต๊ะ ${tableLabel}` : 'Order'}
             </h1>
         </div>
-        <button onClick={fetchOrderHistory} className="flex items-center gap-1 bg-yellow-100 text-yellow-800 px-3 py-2 rounded-full text-sm font-bold shadow-sm hover:bg-yellow-200 transition-colors">
-          <Receipt size={16} /> ประวัติ
-        </button>
+
+        <div className="flex gap-2">
+            {/* ✅ ปุ่มคิดเงิน (แสดงเฉพาะ Owner) */}
+            {userRole === 'owner' && (
+            <button 
+                onClick={() => router.push(`/cashier?table_id=${tableId}`)}
+                className="bg-green-600 text-white px-3 py-2 rounded-full text-sm font-bold flex items-center gap-2 hover:bg-green-700 transition-colors shadow-md"
+            >
+                <Banknote size={16} /> คิดเงิน
+            </button>
+            )}
+
+            <button onClick={fetchOrderHistory} className="flex items-center gap-1 bg-yellow-100 text-yellow-800 px-3 py-2 rounded-full text-sm font-bold shadow-sm hover:bg-yellow-200 transition-colors">
+            <Receipt size={16} /> ประวัติ
+            </button>
+        </div>
       </div>
 
       {/* ✅ Category Quick Nav (Sticky under Header) */}

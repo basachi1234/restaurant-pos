@@ -6,6 +6,7 @@ import generatePayload from "promptpay-qr";
 import QRCode from "qrcode";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
+import { useSearchParams } from "next/navigation"; // ✅ 1. เพิ่ม import นี้
 
 // Import Components
 import TableList from "@/components/cashier/TableList";
@@ -40,6 +41,8 @@ type Discount = {
 };
 
 export default function CashierPage() {
+  const searchParams = useSearchParams(); // ✅ 2. อ่านค่าจาก URL Params
+  
   // Data State
   const [occupiedTables, setOccupiedTables] = useState<any[]>([]);
   const [selectedOrder, setSelectedOrder] = useState<OrderDetail | null>(null);
@@ -66,6 +69,30 @@ export default function CashierPage() {
     fetchOccupiedTables();
     fetchDiscounts();
   }, []);
+
+  // ✅ 3. เพิ่ม Logic ทางลัด: ถ้าโหลดโต๊ะเสร็จแล้ว และมี table_id ใน URL ให้เปิดโต๊ะนั้นเลยอัตโนมัติ
+  useEffect(() => {
+    const targetTableId = searchParams.get("table_id");
+    
+    // ทำงานเมื่อมี occupiedTables (โหลดเสร็จแล้ว) และมี table_id ส่งมา
+    if (targetTableId && occupiedTables.length > 0) {
+      const tableId = Number(targetTableId);
+      
+      // ป้องกันการรีโหลดซ้ำถ้ารายการนั้นถูกเลือกอยู่แล้ว
+      if (selectedOrder?.table_id === tableId) return;
+
+      // หาโต๊ะที่ตรงกับ ID
+      const targetTable = occupiedTables.find(t => t.id === tableId);
+      
+      if (targetTable) {
+        // จำลองการกดเลือกโต๊ะ
+        handleSelectTable(targetTable.id, targetTable.label);
+        
+        // (Optional) ล้างค่า URL เพื่อความสวยงาม และไม่ให้กวนใจเวลากด Refresh
+        window.history.replaceState(null, "", "/cashier"); 
+      }
+    }
+  }, [occupiedTables, searchParams]); // dependency array ต้องใส่ให้ครบเพื่อให้ effect ทำงานถูกจังหวะ
 
   useEffect(() => {
     if (showHistoryModal) fetchHistoryOrders();
