@@ -1,12 +1,12 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, Suspense } from "react"; // ✅ 1. เพิ่ม Suspense
 import { supabase } from "@/lib/supabase";
 import generatePayload from "promptpay-qr";
 import QRCode from "qrcode";
 import Link from "next/link";
-import { ArrowLeft } from "lucide-react";
-import { useSearchParams } from "next/navigation"; // ✅ 1. เพิ่ม import นี้
+import { ArrowLeft, Loader2 } from "lucide-react"; // ✅ 2. เพิ่ม Loader2 สำหรับตอนโหลด
+import { useSearchParams } from "next/navigation";
 
 // Import Components
 import TableList from "@/components/cashier/TableList";
@@ -40,8 +40,9 @@ type Discount = {
   value: number;
 };
 
-export default function CashierPage() {
-  const searchParams = useSearchParams(); // ✅ 2. อ่านค่าจาก URL Params
+// ✅ 3. เปลี่ยนชื่อ Component หลักเดิม เป็น "CashierContent" (ตัวไส้ใน)
+function CashierContent() {
+  const searchParams = useSearchParams(); 
   
   // Data State
   const [occupiedTables, setOccupiedTables] = useState<any[]>([]);
@@ -70,35 +71,27 @@ export default function CashierPage() {
     fetchDiscounts();
   }, []);
 
-  // ✅ 3. เพิ่ม Logic ทางลัด: ถ้าโหลดโต๊ะเสร็จแล้ว และมี table_id ใน URL ให้เปิดโต๊ะนั้นเลยอัตโนมัติ
+  // Logic ทางลัด: ถ้าโหลดโต๊ะเสร็จแล้ว และมี table_id ใน URL ให้เปิดโต๊ะนั้นเลยอัตโนมัติ
   useEffect(() => {
     const targetTableId = searchParams.get("table_id");
     
-    // ทำงานเมื่อมี occupiedTables (โหลดเสร็จแล้ว) และมี table_id ส่งมา
     if (targetTableId && occupiedTables.length > 0) {
       const tableId = Number(targetTableId);
-      
-      // ป้องกันการรีโหลดซ้ำถ้ารายการนั้นถูกเลือกอยู่แล้ว
       if (selectedOrder?.table_id === tableId) return;
 
-      // หาโต๊ะที่ตรงกับ ID
       const targetTable = occupiedTables.find(t => t.id === tableId);
-      
       if (targetTable) {
-        // จำลองการกดเลือกโต๊ะ
         handleSelectTable(targetTable.id, targetTable.label);
-        
-        // (Optional) ล้างค่า URL เพื่อความสวยงาม และไม่ให้กวนใจเวลากด Refresh
-        window.history.replaceState(null, "", "/cashier"); 
+        // window.history.replaceState(null, "", "/cashier"); // (Optional)
       }
     }
-  }, [occupiedTables, searchParams]); // dependency array ต้องใส่ให้ครบเพื่อให้ effect ทำงานถูกจังหวะ
+  }, [occupiedTables, searchParams]);
 
   useEffect(() => {
     if (showHistoryModal) fetchHistoryOrders();
   }, [showHistoryModal, historyDate]);
 
-  // Calculation Logic (เก็บไว้สำหรับแสดงผล Preview เท่านั้น)
+  // Calculation Logic
   const calculation = useMemo(() => {
     if (!selectedOrder) return { subtotal: 0, discount: 0, grandTotal: 0, discountName: "", itemDetails: [] };
 
@@ -219,6 +212,7 @@ export default function CashierPage() {
     const label = tableLabel.toUpperCase();
     const prefix = (label.startsWith("TA") || label.startsWith("A")) ? 'A' : 'T';
     const numPart = label.replace(/\D/g, '').padStart(2, '0');
+    const payPart = paymentMethod === 'cash' ? '1' : '2';
     const tempReceipt = `REC-${now.getFullYear().toString().substr(-2)}${(now.getMonth()+1).toString().padStart(2,'0')}${now.getDate().toString().padStart(2,'0')}-${now.getHours().toString().padStart(2,'0')}${now.getMinutes().toString().padStart(2,'0')}-${prefix}${numPart}`;
 
     setCurrentReceiptNo(tempReceipt);
@@ -256,11 +250,9 @@ export default function CashierPage() {
     alert("ยกเลิกโต๊ะเรียบร้อย 🗑️"); setSelectedOrder(null); fetchOccupiedTables();
   };
 
-  // ✅ [Updated] ฟังก์ชันยืนยันการจ่ายเงิน (ใช้ RPC)
   const handleConfirmPayment = async () => {
     if (!selectedOrder) return;
     
-    // 1. สร้างเลขที่ใบเสร็จ
     const now = new Date();
     const label = selectedOrder.table_label.toUpperCase();
     const prefix = (label.startsWith("TA") || label.startsWith("A")) ? 'A' : 'T';
@@ -269,7 +261,6 @@ export default function CashierPage() {
     const receiptNo = `${now.getFullYear().toString().substr(-2)}${(now.getMonth() + 1).toString().padStart(2, '0')}${now.getDate().toString().padStart(2, '0')}${now.getHours().toString().padStart(2, '0')}${now.getMinutes().toString().padStart(2, '0')}${prefix}${numPart}${payPart}`;
 
     try {
-      // 2. เรียกใช้ RPC Function บน Supabase (Secure & Transactional)
       const { data, error } = await supabase.rpc('confirm_order_payment', {
         p_order_id: selectedOrder.order_id,
         p_discount_id: selectedDiscountId === "" ? null : Number(selectedDiscountId),
@@ -281,14 +272,11 @@ export default function CashierPage() {
 
       console.log("Payment Completed via RPC:", data);
 
-      // 3. อัปเดต UI หลังจากทำรายการสำเร็จ
       setCurrentReceiptNo(receiptNo); 
       setShowPaymentModal(false);
       
-      // 4. สั่งพิมพ์ใบเสร็จอัตโนมัติ และรีเซ็ตหน้าจอ
       setTimeout(() => { window.print(); }, 100);
       setTimeout(() => { 
-        // แสดงยอดเงินที่ Server คำนวณได้จริงเพื่อยืนยันกับผู้ใช้
         alert(`✅ ปิดบิลเรียบร้อย! (ยอดสุทธิ: ${data.grand_total.toLocaleString()} ฿)`); 
         setSelectedOrder(null); 
         fetchOccupiedTables(); 
@@ -338,5 +326,21 @@ export default function CashierPage() {
       
       <style jsx global>{`@media print { body * { visibility: hidden; } #receipt-area, #receipt-area * { visibility: visible; } #receipt-area { position: absolute; left: 0; top: 0; width: 100%; margin: 0; padding: 0; border: none; font-family: 'Courier New', Courier, monospace; } * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; } @page { margin: 0; size: auto; } }`}</style>
     </div>
+  );
+}
+
+// ✅ 4. สร้าง Wrapper หลักชื่อ "CashierPage" ที่มี Suspense ครอบ
+export default function CashierPage() {
+  return (
+    <Suspense fallback={
+      <div className="flex justify-center items-center h-screen bg-gray-100">
+        <div className="flex flex-col items-center gap-2 text-blue-600">
+           <Loader2 className="animate-spin" size={48} />
+           <p className="font-bold">กำลังโหลดข้อมูลแคชเชียร์...</p>
+        </div>
+      </div>
+    }>
+      <CashierContent />
+    </Suspense>
   );
 }
