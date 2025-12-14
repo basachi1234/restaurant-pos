@@ -71,12 +71,13 @@ export default function CashierPage() {
     if (showHistoryModal) fetchHistoryOrders();
   }, [showHistoryModal, historyDate]);
 
-  // Calculation Logic
+  // Calculation Logic (เก็บไว้สำหรับแสดงผล Preview เท่านั้น)
   const calculation = useMemo(() => {
     if (!selectedOrder) return { subtotal: 0, discount: 0, grandTotal: 0, discountName: "", itemDetails: [] };
 
     let subtotal = 0;
-    const itemDetails = selectedOrder.items.map(item => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const itemDetails = selectedOrder.items.map((item: any) => {
       let itemTotal = 0;
       let note = "";
       if (item.promotion_qty > 0 && item.promotion_price > 0 && item.quantity >= item.promotion_qty) {
@@ -152,6 +153,7 @@ export default function CashierPage() {
   const fetchHistoryOrders = async () => {
     const start = new Date(historyDate); start.setHours(0, 0, 0, 0);
     const end = new Date(historyDate); end.setHours(23, 59, 59, 999);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data } = await supabase.from("orders").select("id, receipt_no, total_price, created_at, tables(label)")
       .eq("status", "completed").gte("created_at", start.toISOString()).lte("created_at", end.toISOString())
       .order("created_at", { ascending: false });
@@ -160,6 +162,7 @@ export default function CashierPage() {
 
   // Handlers
   const handleSelectTable = async (tableId: number, tableLabel: string) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data: order } = await supabase.from("orders").select(`id, order_items ( quantity, status, menu_items ( name, price, promotion_qty, promotion_price ) )`).eq("table_id", tableId).eq("status", "active").single();
     if (!order) {
       if (confirm(`⚠️ โต๊ะ ${tableLabel} สถานะไม่ว่างแต่ไม่พบออเดอร์ ต้องการรีเซ็ต?`)) {
@@ -171,6 +174,7 @@ export default function CashierPage() {
 
     const itemMap = new Map<string, any>();
     let pendingCount = 0;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     order.order_items.forEach((i: any) => {
       if (i.status !== 'served') pendingCount++;
       const name = i.menu_items.name;
@@ -199,15 +203,18 @@ export default function CashierPage() {
   };
 
   const handleSelectHistoryOrder = async (orderId: string, receiptNo: string) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data: order } = await supabase.from("orders").select(`id, total_price, promotion_name, tables ( label, id ), order_items ( quantity, status, menu_items ( name, price, promotion_qty, promotion_price ) )`).eq("id", orderId).single();
     if (!order) return;
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const items = order.order_items.map((i: any) => ({
       name: i.menu_items?.name || "Unknown", price: i.menu_items?.price || 0, quantity: i.quantity, status: i.status,
       promotion_qty: i.menu_items?.promotion_qty || 0, promotion_price: i.menu_items?.promotion_price || 0
     }));
 
     setSelectedOrder({
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       order_id: order.id, table_label: (order.tables as any)?.label || "Takeaway", table_id: (order.tables as any)?.id || 0,
       items, total: order.total_price, pendingCount: 0, isReprint: true, promotion_name: order.promotion_name
     });
@@ -222,9 +229,11 @@ export default function CashierPage() {
     alert("ยกเลิกโต๊ะเรียบร้อย 🗑️"); setSelectedOrder(null); fetchOccupiedTables();
   };
 
+  // ✅ [Updated] ฟังก์ชันยืนยันการจ่ายเงิน (ใช้ RPC)
   const handleConfirmPayment = async () => {
     if (!selectedOrder) return;
     
+    // 1. สร้างเลขที่ใบเสร็จ
     const now = new Date();
     const label = selectedOrder.table_label.toUpperCase();
     const prefix = (label.startsWith("TA") || label.startsWith("A")) ? 'A' : 'T';
@@ -232,15 +241,37 @@ export default function CashierPage() {
     const payPart = paymentMethod === 'cash' ? '1' : '2';
     const receiptNo = `${now.getFullYear().toString().substr(-2)}${(now.getMonth() + 1).toString().padStart(2, '0')}${now.getDate().toString().padStart(2, '0')}${now.getHours().toString().padStart(2, '0')}${now.getMinutes().toString().padStart(2, '0')}${prefix}${numPart}${payPart}`;
 
-    const payload: any = { status: "completed", total_price: calculation.grandTotal, receipt_no: receiptNo, payment_method: paymentMethod };
-    if (calculation.discountName) payload.promotion_name = calculation.discountName;
+    try {
+      // 2. เรียกใช้ RPC Function บน Supabase (Secure & Transactional)
+      const { data, error } = await supabase.rpc('confirm_order_payment', {
+        p_order_id: selectedOrder.order_id,
+        p_discount_id: selectedDiscountId === "" ? null : Number(selectedDiscountId),
+        p_payment_method: paymentMethod,
+        p_receipt_no: receiptNo
+      });
 
-    await supabase.from("orders").update(payload).eq("id", selectedOrder.order_id);
-    await supabase.from("tables").update({ status: "available" }).eq("id", selectedOrder.table_id);
+      if (error) throw error;
 
-    setCurrentReceiptNo(receiptNo); setShowPaymentModal(false);
-    setTimeout(() => { window.print(); }, 100);
-    setTimeout(() => { alert(`✅ ปิดบิลเรียบร้อย!`); setSelectedOrder(null); fetchOccupiedTables(); }, 1000);
+      console.log("Payment Completed via RPC:", data);
+
+      // 3. อัปเดต UI หลังจากทำรายการสำเร็จ
+      setCurrentReceiptNo(receiptNo); 
+      setShowPaymentModal(false);
+      
+      // 4. สั่งพิมพ์ใบเสร็จอัตโนมัติ และรีเซ็ตหน้าจอ
+      setTimeout(() => { window.print(); }, 100);
+      setTimeout(() => { 
+        // แสดงยอดเงินที่ Server คำนวณได้จริงเพื่อยืนยันกับผู้ใช้
+        alert(`✅ ปิดบิลเรียบร้อย! (ยอดสุทธิ: ${data.grand_total.toLocaleString()} ฿)`); 
+        setSelectedOrder(null); 
+        fetchOccupiedTables(); 
+      }, 1000);
+
+    } catch (err) {
+      console.error("RPC Error:", err);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      alert("❌ เกิดข้อผิดพลาด: " + (err as any).message);
+    }
   };
 
   const changeAmount = useMemo(() => Math.max(0, (parseFloat(cashReceived) || 0) - calculation.grandTotal), [cashReceived, calculation.grandTotal]);
