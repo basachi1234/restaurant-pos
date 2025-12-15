@@ -8,12 +8,13 @@ import Link from "next/link";
 import { ArrowLeft, Loader2, History } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 
+// Import Components
 import TableList from "@/components/cashier/TableList";
 import ReceiptPreview from "@/components/cashier/ReceiptPreview";
 import PaymentModal from "@/components/cashier/PaymentModal";
 import HistoryModal from "@/components/cashier/HistoryModal";
 
-// ... (Types เดิม) ...
+// Types
 type OrderDetail = {
   order_id: string;
   table_label: string;
@@ -39,9 +40,11 @@ type Discount = {
   value: number;
 };
 
+// Component ไส้ใน
 function CashierContent() {
   const searchParams = useSearchParams(); 
   
+  // Data State
   const [occupiedTables, setOccupiedTables] = useState<any[]>([]);
   const [selectedOrder, setSelectedOrder] = useState<OrderDetail | null>(null);
   const [qrCodeData, setQrCodeData] = useState<string>("");
@@ -51,11 +54,16 @@ function CashierContent() {
   const [discounts, setDiscounts] = useState<Discount[]>([]);
   const [selectedDiscountId, setSelectedDiscountId] = useState<number | "">("");
 
+  // ✅ เพิ่มสถานะเช็คว่าจ่ายเงินเสร็จหรือยัง
+  const [isPaymentSuccess, setIsPaymentSuccess] = useState(false);
+
+  // Payment State
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState<'cash' | 'transfer'>('transfer');
   const [cashReceived, setCashReceived] = useState<string>("");
   const [currentReceiptNo, setCurrentReceiptNo] = useState<string>("");
 
+  // History State
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [historyOrders, setHistoryOrders] = useState<any[]>([]);
   const [historyDate, setHistoryDate] = useState<string>(new Date().toISOString().split('T')[0]);
@@ -66,13 +74,16 @@ function CashierContent() {
     fetchDiscounts();
   }, []);
 
+  // Logic ทางลัด
   useEffect(() => {
     const targetTableId = searchParams.get("table_id");
     if (targetTableId && occupiedTables.length > 0) {
       const tableId = Number(targetTableId);
       if (selectedOrder?.table_id === tableId) return;
       const targetTable = occupiedTables.find(t => t.id === tableId);
-      if (targetTable) handleSelectTable(targetTable.id, targetTable.label);
+      if (targetTable) {
+        handleSelectTable(targetTable.id, targetTable.label);
+      }
     }
   }, [occupiedTables, searchParams]);
 
@@ -80,6 +91,7 @@ function CashierContent() {
     if (showHistoryModal) fetchHistoryOrders();
   }, [showHistoryModal, historyDate]);
 
+  // Calculation Logic
   const calculation = useMemo(() => {
     if (!selectedOrder) return { subtotal: 0, discount: 0, grandTotal: 0, discountName: "", itemDetails: [] };
 
@@ -122,6 +134,7 @@ function CashierContent() {
     return { subtotal, discount, grandTotal, discountName, itemDetails };
   }, [selectedOrder, selectedDiscountId, discounts]);
 
+  // QR Code Generation
   useEffect(() => {
     const genQR = async () => {
       if (!promptPayId || calculation.grandTotal <= 0) {
@@ -166,6 +179,7 @@ function CashierContent() {
     setHistoryOrders(data || []);
   };
 
+  // Handlers
   const handleSelectTable = async (tableId: number, tableLabel: string) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data: order } = await supabase.from("orders").select(`id, order_items ( quantity, status, menu_items ( name, price, promotion_qty, promotion_price ) )`).eq("table_id", tableId).eq("status", "active").single();
@@ -200,7 +214,11 @@ function CashierContent() {
     const tempReceipt = `${now.getFullYear().toString().substr(-2)}${(now.getMonth()+1).toString().padStart(2,'0')}${now.getDate().toString().padStart(2,'0')}${now.getHours().toString().padStart(2,'0')}${now.getMinutes().toString().padStart(2,'0')}${prefix}${numPart}`;
 
     setCurrentReceiptNo(tempReceipt);
-    setSelectedDiscountId(""); setCashReceived(""); setPaymentMethod("transfer");
+    setSelectedDiscountId(""); 
+    setCashReceived(""); 
+    setPaymentMethod("transfer");
+    setIsPaymentSuccess(false); // ✅ รีเซ็ตสถานะจ่ายเงินเมื่อเลือกโต๊ะใหม่
+    
     setSelectedOrder({
       order_id: order.id, table_label: tableLabel, table_id: tableId,
       items: Array.from(itemMap.values()), total: 0, pendingCount, isReprint: false
@@ -225,6 +243,7 @@ function CashierContent() {
     });
     setCurrentReceiptNo(receiptNo || "-");
     setShowHistoryModal(false); setSelectedDiscountId(""); setPaymentMethod('transfer');
+    setIsPaymentSuccess(true); // ประวัติคือจ่ายแล้ว
   };
 
   const handleVoidBill = async () => {
@@ -236,6 +255,7 @@ function CashierContent() {
 
   const handleConfirmPayment = async () => {
     if (!selectedOrder) return;
+    
     const now = new Date();
     const label = selectedOrder.table_label.toUpperCase();
     const prefix = (label.startsWith("TA") || label.startsWith("A")) ? 'A' : 'T';
@@ -252,21 +272,31 @@ function CashierContent() {
       });
 
       if (error) throw error;
+
       console.log("Payment Completed via RPC:", data);
 
       setCurrentReceiptNo(receiptNo); 
       setShowPaymentModal(false);
-      setTimeout(() => { window.print(); }, 100);
-      setTimeout(() => { 
-        alert(`✅ ปิดบิลเรียบร้อย! (ยอดสุทธิ: ${data.grand_total.toLocaleString()} ฿)`); 
-        setSelectedOrder(null); 
-        fetchOccupiedTables(); 
-      }, 1000);
+      
+      // ✅ แก้ไข: ตัด window.print() อัตโนมัติออก เพื่อป้องกัน iOS ค้าง
+      // ✅ แก้ไข: ไม่รีเซ็ต selectedOrder ทันที แต่เปลี่ยนสถานะเป็น "จ่ายแล้ว"
+      setIsPaymentSuccess(true);
+      fetchOccupiedTables(); // อัปเดตรายการโต๊ะ (โต๊ะนี้จะหายไปจากลิสต์ซ้ายมือ)
+      
+      alert(`✅ ปิดบิลเรียบร้อย!\n(ยอดสุทธิ: ${data.grand_total.toLocaleString()} ฿)`);
+
     } catch (err) {
       console.error("RPC Error:", err);
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       alert("❌ เกิดข้อผิดพลาด: " + (err as any).message);
     }
+  };
+
+  // ✅ ฟังก์ชันใหม่สำหรับปุ่ม "จบรายการ" (กดเมื่อพิมพ์เสร็จแล้ว หรือไม่ต้องการพิมพ์)
+  const handleFinishOrder = () => {
+    setSelectedOrder(null);
+    setIsPaymentSuccess(false);
+    fetchOccupiedTables();
   };
 
   const changeAmount = useMemo(() => Math.max(0, (parseFloat(cashReceived) || 0) - calculation.grandTotal), [cashReceived, calculation.grandTotal]);
@@ -275,7 +305,7 @@ function CashierContent() {
   return (
     <div className="min-h-screen bg-gray-100 p-6 flex flex-col gap-6">
       
-      {/* 1. Header: ปุ่ม Back + ประวัติบิล */}
+      {/* Header */}
       <div className="flex items-center justify-between gap-3 mb-2">
         <div className="flex items-center gap-3">
             <Link href="/" className="bg-white p-2 rounded-full shadow-sm hover:bg-gray-50 text-gray-700 transition-colors border border-gray-200">
@@ -296,26 +326,29 @@ function CashierContent() {
         </button>
       </div>
 
-      {/* 2. เนื้อหา (30:70) */}
-      <div className="flex flex-col md:flex-row gap-6 items-start flex-1">
+      {/* ✅ 1. ใช้ justify-center เพื่อจัดกึ่งกลางหน้าจอ */}
+      <div className="flex flex-col md:flex-row gap-4 items-start flex-1 justify-center">
           
-          <div className="w-full md:w-[30%] flex-shrink-0">
+          {/* ✅ 2. รายการโต๊ะ: ปรับขนาดเป็น max-w-lg (ไม่ให้ยืดจนกว้างเกินไป) */}
+          <div className="w-full md:w-auto flex-1 max-w-lg">
             <TableList 
-              tables={occupiedTables} 
-              selectedTableId={selectedOrder?.table_id} 
-              isReprintMode={selectedOrder?.isReprint}
+              tables={occupiedTables} selectedTableId={selectedOrder?.table_id} isReprintMode={selectedOrder?.isReprint}
               onSelectTable={handleSelectTable} 
-              // ✅ ไม่มี onOpenHistory แล้ว
             />
           </div>
 
-          <div className="w-full md:w-[70%]">
+          {/* ✅ 3. ใบเสร็จ: ใช้ w-auto เพื่อให้ขนาดเป็นไปตามที่กำหนดใน ReceiptPreview (300px) */}
+          <div className="w-full md:w-auto flex-shrink-0">
             <ReceiptPreview 
               selectedOrder={selectedOrder} calculation={calculation} shopName={shopName} shopLogo={shopLogo}
               currentReceiptNo={currentReceiptNo} qrCodeData={qrCodeData} paymentMethod={paymentMethod}
               cashReceived={cashReceived} changeAmount={changeAmount} discounts={discounts}
               selectedDiscountId={selectedDiscountId} onSelectDiscount={setSelectedDiscountId}
               onPrint={() => window.print()} onVoid={handleVoidBill} onOpenPayment={() => setShowPaymentModal(true)}
+              
+              // ✅ ส่ง Props ใหม่ไปให้ ReceiptPreview
+              isPaymentSuccess={isPaymentSuccess}
+              onFinishOrder={handleFinishOrder}
             />
           </div>
 
