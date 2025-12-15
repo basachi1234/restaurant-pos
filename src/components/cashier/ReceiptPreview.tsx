@@ -1,6 +1,6 @@
 import { Printer, TicketPercent, AlertTriangle, ChefHat, Ban, CheckCircle, Check } from "lucide-react";
 
-// Types
+// Types ... (เหมือนเดิม)
 type ItemDetail = {
   name: string;
   quantity: number;
@@ -181,7 +181,7 @@ export default function ReceiptPreview({
           onClick={onPrint}
           className="bg-gray-800 text-white px-3 py-2 rounded-lg flex gap-2 font-bold hover:bg-black transition-colors flex-1 justify-center items-center text-xs"
         >
-          <Printer size={16} /> {selectedOrder.isReprint || isPaymentSuccess ? "พิมพ์" : "พิมพ์ใบเสร็จ"}
+          <Printer size={16} /> {selectedOrder.isReprint || isPaymentSuccess ? "พิมพ์" : "ใบแจ้งหนี้"}
         </button>
 
         {!selectedOrder.isReprint && (

@@ -303,10 +303,11 @@ function CashierContent() {
   const minDate = useMemo(() => { const d = new Date(); d.setDate(d.getDate() - 30); return d.toISOString().split('T')[0]; }, []);
 
   return (
-    <div className="min-h-screen bg-gray-100 p-6 flex flex-col gap-6">
+    // ✅ 1. เพิ่ม padding รอบนอกเป็น p-4 เพื่อให้ห่างจากขอบมากขึ้น
+    <div className="min-h-screen bg-gray-100 p-4 flex flex-col gap-4">
       
       {/* Header */}
-      <div className="flex items-center justify-between gap-3 mb-2">
+      <div className="flex items-center justify-between gap-3 mb-1 px-1">
         <div className="flex items-center gap-3">
             <Link href="/" className="bg-white p-2 rounded-full shadow-sm hover:bg-gray-50 text-gray-700 transition-colors border border-gray-200">
               <ArrowLeft size={20} />
@@ -326,18 +327,18 @@ function CashierContent() {
         </button>
       </div>
 
-      {/* ✅ 1. ใช้ justify-center เพื่อจัดกึ่งกลางหน้าจอ */}
-      <div className="flex flex-col md:flex-row gap-4 items-start flex-1 justify-center">
+      {/* ✅ 2. Layout หลัก: ใช้ justify-center เพื่อจัดกึ่งกลาง และ gap-3 ให้ชิดกัน */}
+      <div className="flex flex-col md:flex-row gap-3 items-start flex-1 justify-center">
           
-          {/* ✅ 2. รายการโต๊ะ: ปรับขนาดเป็น max-w-lg (ไม่ให้ยืดจนกว้างเกินไป) */}
-          <div className="w-full md:w-auto flex-1 max-w-lg">
+          {/* ✅ 3. รายการโต๊ะ: กำหนดความกว้าง Fixed 450px เพื่อให้คงที่และดูสมดุลกับใบเสร็จ */}
+          <div className="w-full md:w-[450px] flex-shrink-0">
             <TableList 
               tables={occupiedTables} selectedTableId={selectedOrder?.table_id} isReprintMode={selectedOrder?.isReprint}
               onSelectTable={handleSelectTable} 
             />
           </div>
 
-          {/* ✅ 3. ใบเสร็จ: ใช้ w-auto เพื่อให้ขนาดเป็นไปตามที่กำหนดใน ReceiptPreview (300px) */}
+          {/* ✅ 4. ใบเสร็จ: ใช้ w-auto เพื่อให้ขนาดเป็นไปตามที่กำหนดใน ReceiptPreview (300px) */}
           <div className="w-full md:w-auto flex-shrink-0">
             <ReceiptPreview 
               selectedOrder={selectedOrder} calculation={calculation} shopName={shopName} shopLogo={shopLogo}
@@ -369,7 +370,46 @@ function CashierContent() {
         />
       )}
       
-      <style jsx global>{`@media print { body * { visibility: hidden; } #receipt-area, #receipt-area * { visibility: visible; } #receipt-area { position: absolute; left: 0; top: 0; width: 100%; margin: 0; padding: 0; border: none; font-family: 'Courier New', Courier, monospace; } * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; } @page { margin: 0; size: auto; } }`}</style>
+      {/* ✅ ปรับ CSS Print: ไม่ลบขอบกระดาษ (ลบ margin: 0 ของ @page ออก) แต่ยังคง fix position เพื่อให้ใบเสร็จอยู่หน้าแรกเสมอ */}
+      <style jsx global>{`
+        @media print {
+          @page {
+            /* ❌ เอา margin: 0; ออก เพื่อให้เครื่องพิมพ์ใช้ขอบ Default */
+            size: auto;
+          }
+          
+          html, body {
+            height: auto;
+            overflow: visible;
+            background: white;
+            /* ❌ เอา margin: 0 !important; ของ body ออกด้วยก็ได้ครับ ถ้าอยากให้มีขอบ */
+            margin: 0; 
+            padding: 0;
+          }
+
+          body * {
+            visibility: hidden;
+          }
+
+          #receipt-area, #receipt-area * {
+            visibility: visible;
+          }
+
+          #receipt-area {
+            position: fixed; /* ยังคงใช้ fixed เพื่อให้เกาะมุมซ้ายบนของ "พื้นที่พิมพ์" */
+            left: 0;
+            top: 0;
+            width: 100%;
+            z-index: 9999;
+            /* เอา margin ออก ให้เป็นไปตาม @page */
+          }
+
+          * {
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+          }
+        }
+      `}</style>
     </div>
   );
 }
