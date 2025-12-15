@@ -1,20 +1,19 @@
 "use client";
 
-import { useEffect, useState, useMemo, Suspense } from "react"; // ✅ 1. เพิ่ม Suspense
+import { useEffect, useState, useMemo, Suspense } from "react";
 import { supabase } from "@/lib/supabase";
 import generatePayload from "promptpay-qr";
 import QRCode from "qrcode";
 import Link from "next/link";
-import { ArrowLeft, Loader2 } from "lucide-react"; // ✅ 2. เพิ่ม Loader2 สำหรับตอนโหลด
+import { ArrowLeft, Loader2, History } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 
-// Import Components
 import TableList from "@/components/cashier/TableList";
 import ReceiptPreview from "@/components/cashier/ReceiptPreview";
 import PaymentModal from "@/components/cashier/PaymentModal";
 import HistoryModal from "@/components/cashier/HistoryModal";
 
-// Types
+// ... (Types เดิม) ...
 type OrderDetail = {
   order_id: string;
   table_label: string;
@@ -40,11 +39,9 @@ type Discount = {
   value: number;
 };
 
-// ✅ 3. เปลี่ยนชื่อ Component หลักเดิม เป็น "CashierContent" (ตัวไส้ใน)
 function CashierContent() {
   const searchParams = useSearchParams(); 
   
-  // Data State
   const [occupiedTables, setOccupiedTables] = useState<any[]>([]);
   const [selectedOrder, setSelectedOrder] = useState<OrderDetail | null>(null);
   const [qrCodeData, setQrCodeData] = useState<string>("");
@@ -54,13 +51,11 @@ function CashierContent() {
   const [discounts, setDiscounts] = useState<Discount[]>([]);
   const [selectedDiscountId, setSelectedDiscountId] = useState<number | "">("");
 
-  // Payment State
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState<'cash' | 'transfer'>('transfer');
   const [cashReceived, setCashReceived] = useState<string>("");
   const [currentReceiptNo, setCurrentReceiptNo] = useState<string>("");
 
-  // History State
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [historyOrders, setHistoryOrders] = useState<any[]>([]);
   const [historyDate, setHistoryDate] = useState<string>(new Date().toISOString().split('T')[0]);
@@ -71,19 +66,13 @@ function CashierContent() {
     fetchDiscounts();
   }, []);
 
-  // Logic ทางลัด: ถ้าโหลดโต๊ะเสร็จแล้ว และมี table_id ใน URL ให้เปิดโต๊ะนั้นเลยอัตโนมัติ
   useEffect(() => {
     const targetTableId = searchParams.get("table_id");
-    
     if (targetTableId && occupiedTables.length > 0) {
       const tableId = Number(targetTableId);
       if (selectedOrder?.table_id === tableId) return;
-
       const targetTable = occupiedTables.find(t => t.id === tableId);
-      if (targetTable) {
-        handleSelectTable(targetTable.id, targetTable.label);
-        // window.history.replaceState(null, "", "/cashier"); // (Optional)
-      }
+      if (targetTable) handleSelectTable(targetTable.id, targetTable.label);
     }
   }, [occupiedTables, searchParams]);
 
@@ -91,7 +80,6 @@ function CashierContent() {
     if (showHistoryModal) fetchHistoryOrders();
   }, [showHistoryModal, historyDate]);
 
-  // Calculation Logic
   const calculation = useMemo(() => {
     if (!selectedOrder) return { subtotal: 0, discount: 0, grandTotal: 0, discountName: "", itemDetails: [] };
 
@@ -134,7 +122,6 @@ function CashierContent() {
     return { subtotal, discount, grandTotal, discountName, itemDetails };
   }, [selectedOrder, selectedDiscountId, discounts]);
 
-  // QR Code Generation
   useEffect(() => {
     const genQR = async () => {
       if (!promptPayId || calculation.grandTotal <= 0) {
@@ -150,7 +137,6 @@ function CashierContent() {
     genQR();
   }, [calculation.grandTotal, promptPayId]);
 
-  // Data Fetching Functions
   const fetchStoreInfo = async () => {
     const { data } = await supabase.from("store_settings").select("*").eq("id", 1).single();
     if (data) {
@@ -180,7 +166,6 @@ function CashierContent() {
     setHistoryOrders(data || []);
   };
 
-  // Handlers
   const handleSelectTable = async (tableId: number, tableLabel: string) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data: order } = await supabase.from("orders").select(`id, order_items ( quantity, status, menu_items ( name, price, promotion_qty, promotion_price ) )`).eq("table_id", tableId).eq("status", "active").single();
@@ -212,8 +197,7 @@ function CashierContent() {
     const label = tableLabel.toUpperCase();
     const prefix = (label.startsWith("TA") || label.startsWith("A")) ? 'A' : 'T';
     const numPart = label.replace(/\D/g, '').padStart(2, '0');
-    const payPart = paymentMethod === 'cash' ? '1' : '2';
-    const tempReceipt = `REC-${now.getFullYear().toString().substr(-2)}${(now.getMonth()+1).toString().padStart(2,'0')}${now.getDate().toString().padStart(2,'0')}-${now.getHours().toString().padStart(2,'0')}${now.getMinutes().toString().padStart(2,'0')}-${prefix}${numPart}`;
+    const tempReceipt = `${now.getFullYear().toString().substr(-2)}${(now.getMonth()+1).toString().padStart(2,'0')}${now.getDate().toString().padStart(2,'0')}${now.getHours().toString().padStart(2,'0')}${now.getMinutes().toString().padStart(2,'0')}${prefix}${numPart}`;
 
     setCurrentReceiptNo(tempReceipt);
     setSelectedDiscountId(""); setCashReceived(""); setPaymentMethod("transfer");
@@ -252,7 +236,6 @@ function CashierContent() {
 
   const handleConfirmPayment = async () => {
     if (!selectedOrder) return;
-    
     const now = new Date();
     const label = selectedOrder.table_label.toUpperCase();
     const prefix = (label.startsWith("TA") || label.startsWith("A")) ? 'A' : 'T';
@@ -269,19 +252,16 @@ function CashierContent() {
       });
 
       if (error) throw error;
-
       console.log("Payment Completed via RPC:", data);
 
       setCurrentReceiptNo(receiptNo); 
       setShowPaymentModal(false);
-      
       setTimeout(() => { window.print(); }, 100);
       setTimeout(() => { 
         alert(`✅ ปิดบิลเรียบร้อย! (ยอดสุทธิ: ${data.grand_total.toLocaleString()} ฿)`); 
         setSelectedOrder(null); 
         fetchOccupiedTables(); 
       }, 1000);
-
     } catch (err) {
       console.error("RPC Error:", err);
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -293,21 +273,53 @@ function CashierContent() {
   const minDate = useMemo(() => { const d = new Date(); d.setDate(d.getDate() - 30); return d.toISOString().split('T')[0]; }, []);
 
   return (
-    <div className="min-h-screen bg-gray-100 p-6 flex flex-col md:flex-row gap-6">
-      <div className="md:hidden mb-4"><Link href="/" className="bg-gray-200 p-2 rounded"><ArrowLeft /></Link></div>
+    <div className="min-h-screen bg-gray-100 p-6 flex flex-col gap-6">
       
-      <TableList 
-        tables={occupiedTables} selectedTableId={selectedOrder?.table_id} isReprintMode={selectedOrder?.isReprint}
-        onSelectTable={handleSelectTable} onOpenHistory={() => setShowHistoryModal(true)}
-      />
+      {/* 1. Header: ปุ่ม Back + ประวัติบิล */}
+      <div className="flex items-center justify-between gap-3 mb-2">
+        <div className="flex items-center gap-3">
+            <Link href="/" className="bg-white p-2 rounded-full shadow-sm hover:bg-gray-50 text-gray-700 transition-colors border border-gray-200">
+              <ArrowLeft size={20} />
+            </Link>
+            <div>
+               <h1 className="font-bold text-lg text-gray-800">แคชเชียร์</h1>
+               <p className="text-xs text-gray-500">จัดการโต๊ะและชำระเงิน</p>
+            </div>
+        </div>
 
-      <ReceiptPreview 
-        selectedOrder={selectedOrder} calculation={calculation} shopName={shopName} shopLogo={shopLogo}
-        currentReceiptNo={currentReceiptNo} qrCodeData={qrCodeData} paymentMethod={paymentMethod}
-        cashReceived={cashReceived} changeAmount={changeAmount} discounts={discounts}
-        selectedDiscountId={selectedDiscountId} onSelectDiscount={setSelectedDiscountId}
-        onPrint={() => window.print()} onVoid={handleVoidBill} onOpenPayment={() => setShowPaymentModal(true)}
-      />
+        <button 
+          onClick={() => setShowHistoryModal(true)}
+          className="bg-white text-blue-600 px-4 py-2 rounded-lg shadow-sm hover:bg-blue-50 border border-blue-100 font-bold flex items-center gap-2 transition-colors"
+        >
+          <History size={20} />
+          <span className="hidden sm:inline">ประวัติบิล</span>
+        </button>
+      </div>
+
+      {/* 2. เนื้อหา (30:70) */}
+      <div className="flex flex-col md:flex-row gap-6 items-start flex-1">
+          
+          <div className="w-full md:w-[30%] flex-shrink-0">
+            <TableList 
+              tables={occupiedTables} 
+              selectedTableId={selectedOrder?.table_id} 
+              isReprintMode={selectedOrder?.isReprint}
+              onSelectTable={handleSelectTable} 
+              // ✅ ไม่มี onOpenHistory แล้ว
+            />
+          </div>
+
+          <div className="w-full md:w-[70%]">
+            <ReceiptPreview 
+              selectedOrder={selectedOrder} calculation={calculation} shopName={shopName} shopLogo={shopLogo}
+              currentReceiptNo={currentReceiptNo} qrCodeData={qrCodeData} paymentMethod={paymentMethod}
+              cashReceived={cashReceived} changeAmount={changeAmount} discounts={discounts}
+              selectedDiscountId={selectedDiscountId} onSelectDiscount={setSelectedDiscountId}
+              onPrint={() => window.print()} onVoid={handleVoidBill} onOpenPayment={() => setShowPaymentModal(true)}
+            />
+          </div>
+
+      </div>
 
       {showPaymentModal && (
         <PaymentModal 
@@ -329,7 +341,6 @@ function CashierContent() {
   );
 }
 
-// ✅ 4. สร้าง Wrapper หลักชื่อ "CashierPage" ที่มี Suspense ครอบ
 export default function CashierPage() {
   return (
     <Suspense fallback={

@@ -1,45 +1,74 @@
-import { History } from "lucide-react";
+import { Utensils, Clock, Users } from "lucide-react";
 
-// ✅ เพิ่ม isReprintMode เข้าไปใน Props
 type Props = {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   tables: any[];
   selectedTableId: number | undefined;
-  isReprintMode: boolean | undefined; // 👈 จุดที่ต้องเพิ่ม
+  isReprintMode: boolean | undefined;
   onSelectTable: (id: number, label: string) => void;
-  onOpenHistory: () => void;
+  // ❌ ลบ onOpenHistory ออก (ไม่ใช้แล้ว)
 };
 
 export default function TableList({ 
   tables, 
   selectedTableId, 
-  isReprintMode, // 👈 รับค่ามาใช้
-  onSelectTable, 
-  onOpenHistory 
+  isReprintMode, 
+  onSelectTable 
 }: Props) {
   return (
-    <div className="w-full md:w-1/3 print:hidden">
-      <div className="mb-6 flex items-center justify-between">
-        <h1 className="text-2xl font-bold">💵 แคชเชียร์</h1>
-        <button 
-          onClick={onOpenHistory}
-          className="bg-gray-800 text-white px-3 py-2 rounded-lg text-sm flex items-center gap-2 hover:bg-gray-700 shadow-sm"
-        >
-          <History size={16} /> ประวัติบิล
-        </button>
+    <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden h-full flex flex-col">
+      
+      {/* Header ของ Box */}
+      <div className="p-4 border-b bg-gray-50 flex justify-between items-center">
+        <h2 className="font-bold text-gray-700 flex items-center gap-2 text-sm lg:text-base">
+          <Utensils size={18} /> โต๊ะที่กำลังทาน
+        </h2>
+        <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded-full font-bold">
+          {tables.length} โต๊ะ
+        </span>
+        {/* ❌ ปุ่ม History เดิมตรงนี้ถูกลบออกแล้ว */}
       </div>
-
-      <div className="grid gap-3">
-        {tables.length === 0 && <p className="text-gray-500 text-center py-10">ไม่มีลูกค้าในร้าน</p>}
-        {tables.map((t) => (
-          <button 
-            key={t.id} 
-            onClick={() => onSelectTable(t.id, t.label)} 
-            className={`p-4 rounded-xl text-left shadow-sm border-2 transition-all ${selectedTableId === t.id && !isReprintMode ? "border-blue-500 bg-blue-50" : "bg-white border-transparent"}`}
-          >
-            <div className="font-bold text-lg">โต๊ะ {t.label}</div>
-            <div className="text-red-500 text-sm animate-pulse">● กำลังทาน...</div>
-          </button>
-        ))}
+      
+      {/* Content Grid */}
+      <div className="p-3 overflow-y-auto flex-1 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-3 xl:grid-cols-4 gap-3 content-start">
+        {tables.length === 0 ? (
+           <div className="col-span-full flex flex-col items-center justify-center py-10 text-gray-400 gap-2">
+             <Users size={48} className="opacity-20" />
+             <p className="text-sm">ไม่มีลูกค้าในร้าน</p>
+           </div>
+        ) : (
+           tables.map((table) => {
+             const isSelected = selectedTableId === table.id;
+             return (
+               <button
+                 key={table.id}
+                 onClick={() => onSelectTable(table.id, table.label)}
+                 className={`
+                   relative p-3 rounded-xl border-2 transition-all flex flex-col items-center gap-2
+                   ${isSelected 
+                     ? "border-blue-500 bg-blue-50 shadow-md scale-105 z-10" 
+                     : "border-transparent bg-gray-50 hover:bg-gray-100 hover:border-gray-200"
+                   }
+                   ${isReprintMode && isSelected ? "border-orange-500 bg-orange-50" : ""}
+                 `}
+               >
+                 <div className={`
+                   w-10 h-10 rounded-full flex items-center justify-center font-bold text-lg
+                   ${isSelected ? "bg-blue-600 text-white" : "bg-white text-gray-600 border border-gray-200"}
+                 `}>
+                   {table.label.replace(/\D/g, '')}
+                 </div>
+                 <div className="font-bold text-gray-700 text-sm">{table.label}</div>
+                 
+                 {isSelected && (
+                   <div className="absolute -top-2 -right-2 bg-green-500 text-white p-1 rounded-full shadow-sm">
+                     <Clock size={12} />
+                   </div>
+                 )}
+               </button>
+             );
+           })
+        )}
       </div>
     </div>
   );
