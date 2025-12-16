@@ -1,7 +1,7 @@
 "use client";
 import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
-import { Settings as SettingsIcon, Trash2 } from "lucide-react";
+import { Settings as SettingsIcon, Trash2, Clock } from "lucide-react";
 import { resizeAndUploadImage } from "@/lib/utils";
 
 export default function SettingsTab() {
@@ -12,6 +12,9 @@ export default function SettingsTab() {
   const [totalTakeawayTables, setTotalTakeawayTables] = useState<number | string>(0);
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
+
+  // ✅ เพิ่ม State เวลาปิดร้านอัตโนมัติ
+  const [autoCloseTime, setAutoCloseTime] = useState("03:00");
 
   // Cleanup
   const [cleanupDate, setCleanupDate] = useState("");
@@ -25,6 +28,11 @@ export default function SettingsTab() {
       setShopName(settings.shop_name || "");
       setPromptPayId(settings.promptpay_id || "");
       setShopLogo(settings.shop_logo_url);
+      
+      // ✅ ดึงค่าเวลามาใส่ (ตัดเอาแค่ HH:mm)
+      if (settings.auto_close_time) {
+        setAutoCloseTime(settings.auto_close_time.slice(0, 5));
+      }
     }
 
     const { count: tCount } = await supabase.from("tables").select("*", { count: 'exact', head: true }).like('label', 'T%').not('label', 'like', 'TA%');
@@ -40,7 +48,13 @@ export default function SettingsTab() {
       let url = shopLogo;
       if (logoFile) url = await resizeAndUploadImage(logoFile);
 
-      await supabase.from("store_settings").update({ shop_name: shopName, promptpay_id: promptPayId, shop_logo_url: url }).eq("id", 1);
+      // ✅ บันทึก auto_close_time ลง DB
+      await supabase.from("store_settings").update({ 
+        shop_name: shopName, 
+        promptpay_id: promptPayId, 
+        shop_logo_url: url,
+        auto_close_time: autoCloseTime 
+      }).eq("id", 1);
 
       const targetT = typeof totalTables === 'string' ? parseInt(totalTables) || 0 : totalTables;
       await updateTables(targetT, 'T');
@@ -73,13 +87,13 @@ export default function SettingsTab() {
   };
 
   const handleCleanup = async () => {
-    // ✅ 1. ตรวจสอบสถานะร้าน (ต้องปิดร้านก่อน)
-    const { data: settings } = await supabase.from("store_settings").select("is_open").eq("id", 1).single();
-    if (settings?.is_open) {
-      return alert("⛔ ไม่สามารถล้างข้อมูลได้: ระบบแจ้งว่า 'ร้านยังเปิดอยู่'\nกรุณากด 'ปิดร้าน' ที่มุมขวาบนก่อนทำรายการครับ");
+    // 1. ตรวจสอบสถานะร้าน (เปลี่ยนมาใช้ field ใหม่ is_shop_open)
+    const { data: settings } = await supabase.from("store_settings").select("is_shop_open").eq("id", 1).single();
+    if (settings?.is_shop_open) {
+      return alert("⛔ ไม่สามารถล้างข้อมูลได้: ระบบแจ้งว่า 'ร้านยังเปิดอยู่'\nกรุณากด 'ปิดร้าน' ที่หน้า Dashboard ก่อนทำรายการครับ");
     }
 
-    // ✅ 2. ตรวจสอบว่ามีโต๊ะค้างอยู่ไหม (ต้องไม่มีลูกค้า)
+    // 2. ตรวจสอบว่ามีโต๊ะค้างอยู่ไหม
     const { count: occupiedCount } = await supabase.from("tables").select("*", { count: 'exact', head: true }).eq("status", "occupied");
     if (occupiedCount && occupiedCount > 0) {
       return alert(`⛔ ไม่สามารถล้างข้อมูลได้: ยังมีลูกค้าใช้งานอยู่ ${occupiedCount} โต๊ะ\nกรุณาเคลียร์โต๊ะให้ว่างทั้งหมดก่อนครับ`);
@@ -149,7 +163,24 @@ export default function SettingsTab() {
             <div><label className="font-bold text-sm text-gray-600 block mb-1">พร้อมเพย์</label><input type="text" value={promptPayId} onChange={e => setPromptPayId(e.target.value)} className="w-full border p-3 rounded-lg font-mono" required /></div>
             <div><label className="font-bold text-sm text-gray-600 block mb-1">จำนวนโต๊ะ (T)</label><div className="flex items-center gap-2"><input type="number" value={totalTables} onChange={e => setTotalTables(e.target.value)} className="w-24 border p-3 rounded-lg text-center font-bold" min="1" max="100" required /><span className="text-sm text-gray-500">โต๊ะ</span></div></div>
             <div><label className="font-bold text-sm text-gray-600 block mb-1">โต๊ะกลับบ้าน (TA)</label><div className="flex items-center gap-2"><input type="number" value={totalTakeawayTables} onChange={e => setTotalTakeawayTables(e.target.value)} className="w-24 border p-3 rounded-lg text-center font-bold" min="0" max="50" required /><span className="text-sm text-gray-500">คิว</span></div></div>
+            
             <div><label className="font-bold text-sm text-gray-600 block mb-1">โลโก้</label><input type="file" accept="image/*" onChange={e => { if (e.target.files?.[0]) setLogoFile(e.target.files[0]) }} className="w-full border p-2 rounded text-sm bg-gray-50" />{shopLogo && !logoFile && <img src={shopLogo} className="h-16 mt-2 border p-1 rounded" alt="Logo" />}</div>
+
+            {/* ✅ เพิ่มช่องตั้งเวลาปิดร้าน (Auto Close) ตรงนี้ */}
+            <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
+               <label className="font-bold text-sm text-gray-700 mb-1 flex items-center gap-2">
+                 <Clock size={16} className="text-blue-600"/> เวลาปิดร้านอัตโนมัติ (Auto Close)
+               </label>
+               <div className="text-xs text-gray-500 mb-2">
+                 *เมื่อถึงเวลานี้ ร้านจะเปลี่ยนสถานะเป็น "ปิด" โดยอัตโนมัติ และบล็อกไม่ให้เปิดบิลเพิ่ม
+               </div>
+               <input 
+                 type="time" 
+                 value={autoCloseTime} 
+                 onChange={(e) => setAutoCloseTime(e.target.value)}
+                 className="w-full p-2 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+               />
+            </div>
           </div>
           <button disabled={uploading} className="bg-blue-600 text-white py-3 rounded-lg font-bold shadow-md hover:bg-blue-700">{uploading ? "..." : "บันทึกการตั้งค่า"}</button>
         </form>

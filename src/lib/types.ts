@@ -9,7 +9,7 @@ export type MenuItem = {
   image_url: string | null;
   promotion_qty: number;
   promotion_price: number;
-  is_weight: boolean; // ✅ เพิ่มบรรทัดนี้ครับ
+  is_weight: boolean;
 };
 
 export type UserProfile = {
@@ -42,5 +42,8 @@ export type StoreSetting = {
   shop_name: string;
   promptpay_id: string;
   shop_logo_url: string | null;
-  is_open: boolean;
+  // ✅ เพิ่ม 3 field นี้สำหรับการเปิด-ปิดร้าน
+  is_shop_open: boolean;
+  auto_close_time: string;
+  current_business_day: string;
 };

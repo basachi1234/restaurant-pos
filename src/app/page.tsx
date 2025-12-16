@@ -5,9 +5,7 @@ import { supabase } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Settings, LogOut, Lock, Utensils, ShoppingBag } from "lucide-react";
-import { logout, getSession } from "./actions"; // ✅ Import actions
-
-// ลบฟังก์ชัน getCookie แบบเดิมออก เพราะอ่าน HttpOnly Cookie ไม่ได้แล้ว
+import { logout, getSession } from "./actions";
 
 type Table = {
   id: number;
@@ -18,22 +16,21 @@ type Table = {
 export default function Home() {
   const [tables, setTables] = useState<Table[]>([]);
   const [isStoreOpen, setIsStoreOpen] = useState(true);
-  
-  // ✅ แก้ไข: เปลี่ยนให้รองรับ null ได้ (เพื่อแก้บั๊ก Argument of type 'null'...)
   const [userRole, setUserRole] = useState<string | null>(null);
 
   // Store Info
   const [shopName, setShopName] = useState("ร้านอาหาร");
   const [shopLogo, setShopLogo] = useState<string | null>(null);
+  
+  // ✅ เก็บข้อมูลร้านไว้ใน State เพื่อใช้ใน interval
+  const [storeSettings, setStoreSettings] = useState<any>(null);
 
   const router = useRouter();
 
   useEffect(() => {
-    // ✅ 1. เรียก Server Action เพื่อเช็ค Role
     const checkUser = async () => {
       try {
         const session = await getSession();
-        // ถ้า session.role เป็น undefined หรือ null ก็จะเก็บเป็น null หรือค่าที่ส่งมา
         setUserRole(session.role || null); 
       } catch (err) {
         console.error("Error checking session:", err);
@@ -52,11 +49,17 @@ export default function Home() {
       .on("postgres_changes", { event: "*", schema: "public", table: "store_settings" }, () => fetchData())
       .subscribe();
 
+    // ✅ เพิ่ม Interval เช็คเวลาทุก 1 นาที
+    const intervalId = setInterval(() => {
+      checkAutoClose(storeSettings);
+    }, 60000); // 60 วินาที
+
     return () => { 
       supabase.removeChannel(channelTables); 
       supabase.removeChannel(channelSettings); 
+      clearInterval(intervalId); // Clear interval
     };
-  }, []);
+  }, [storeSettings]); // dependency ใส่ storeSettings เพื่อให้ interval ได้ค่าล่าสุด
 
   const fetchData = async () => {
     const { data: tableData } = await supabase.from("tables").select("*").order("id", { ascending: true });
@@ -64,16 +67,52 @@ export default function Home() {
 
     const { data: settings } = await supabase.from("store_settings").select("*").eq("id", 1).single();
     if (settings) {
+      setStoreSettings(settings); // ✅ เก็บค่า setting ล่าสุดไว้
+      checkAutoClose(settings);   // เช็คทันที 1 รอบตอนโหลด
+      
       setIsStoreOpen(settings.is_open);
       setShopName(settings.shop_name || "ร้านอาหาร");
-      setShopLogo(settings.shop_logo_url || null); // ✅ ใส่ || null กันเหนียว
+      setShopLogo(settings.shop_logo_url || null);
     }
   };
 
-  // ✅ 2. ใช้ Server Action สำหรับ Logout
+  // ✅ ฟังก์ชันเช็ค Auto Close แยกออกมา
+  const checkAutoClose = async (settings: any) => {
+    if (!settings || !settings.is_open || !settings.auto_close_time || !settings.current_business_day) return;
+
+    const now = new Date();
+    const businessDate = new Date(settings.current_business_day);
+    const [closeHour, closeMinute] = settings.auto_close_time.split(':').map(Number);
+    
+    const autoCloseDate = new Date(businessDate);
+    if (closeHour < 12) {
+       autoCloseDate.setDate(autoCloseDate.getDate() + 1);
+    }
+    autoCloseDate.setHours(closeHour, closeMinute, 0);
+
+    // ถ้าปัจจุบันเลยเวลาปิดแล้ว
+    if (now > autoCloseDate) {
+      console.log("⏳ เลยเวลา Auto Close -> กำลังปิดร้านอัตโนมัติ...");
+      
+      try {
+        // 1. ✅ เรียก RPC เพื่อบันทึกยอดขายลงบัญชี (เหมือนกดปุ่มปิดร้าน)
+        // หมายเหตุ: เรียก RPC ก่อนปิดร้าน เพื่อให้มั่นใจว่ายอดถูกบันทึก
+        await supabase.rpc('close_shop_day'); 
+
+        // 2. ปิดร้านใน DB
+        await supabase.from("store_settings").update({ is_open: false }).eq("id", 1);
+        
+        setIsStoreOpen(false);
+        console.log("✅ ปิดร้านอัตโนมัติเรียบร้อย");
+      } catch (err) {
+        console.error("Auto Close Error:", err);
+      }
+    }
+  };
+
   const handleLogout = async () => {
     await logout();
-    window.location.href = "/login"; // ใช้ window.location เพื่อบังคับโหลดหน้าใหม่และเคลียร์ state
+    window.location.href = "/login";
   };
 
   const handleTableClick = async (table: Table) => {
@@ -82,7 +121,7 @@ export default function Home() {
       return; 
     }
 
-    // เช็คสถานะร้านล่าสุดอีกครั้งกันพลาด
+    // Double Check
     const { data: settings } = await supabase.from("store_settings").select("is_open").eq("id", 1).single();
     if (settings && settings.is_open === false) { 
       alert("⛔ ร้านปิดอยู่ครับ"); 
@@ -96,7 +135,6 @@ export default function Home() {
       if (!confirmOpen) return;
 
       try {
-        // สร้าง Order ใหม่
         const { data: newOrder, error: orderError } = await supabase
           .from("orders")
           .insert({ table_id: table.id, status: "active" })
@@ -105,7 +143,6 @@ export default function Home() {
           
         if (orderError) throw orderError;
         
-        // อัปเดตสถานะโต๊ะ
         const { error: tableError } = await supabase
           .from("tables")
           .update({ status: "occupied" })
@@ -119,7 +156,6 @@ export default function Home() {
         alert("เกิดข้อผิดพลาดในการเปิดบิล"); 
       }
     } else {
-      // โต๊ะไม่ว่าง -> หา Order ปัจจุบันเพื่อเข้าหน้าสั่งอาหาร
       const { data: activeOrder } = await supabase
         .from("orders")
         .select("id")
@@ -130,7 +166,7 @@ export default function Home() {
       if (activeOrder) {
         router.push(`/order/${activeOrder.id}`);
       } else {
-        alert("ไม่พบข้อมูลออเดอร์ (อาจเกิดข้อผิดพลาดของข้อมูล)");
+        alert("ไม่พบข้อมูลออเดอร์");
       }
     }
   };
@@ -138,7 +174,6 @@ export default function Home() {
   const takeawayTables = tables.filter(t => t.label.startsWith("TA"));
   const dineInTables = tables.filter(t => !t.label.startsWith("TA"));
 
-  // Component ย่อยสำหรับปุ่มโต๊ะ
   const TableButton = ({ table, isTakeaway = false }: { table: Table, isTakeaway?: boolean }) => (
     <button
       onClick={() => handleTableClick(table)}
@@ -170,7 +205,6 @@ export default function Home() {
       {/* Header */}
       <div className="flex flex-col md:flex-row justify-between items-center mb-6 gap-4">
         <div className="flex items-center gap-3">
-          {/* Logo */}
           {shopLogo ? (
             <img src={shopLogo} alt="Logo" className="w-12 h-12 rounded-full object-cover border shadow-sm" />
           ) : (
@@ -181,12 +215,10 @@ export default function Home() {
         </div>
 
         <div className="flex gap-3 flex-wrap justify-center">
-          {/* 1. ปุ่มครัว (ทุกคนเห็น) */}
           <Link href="/kitchen" className="bg-gray-800 hover:bg-black text-white px-4 py-2 rounded-lg font-bold shadow-md flex items-center gap-2 transition-transform hover:scale-105">
             👨‍🍳 ครัว
           </Link>
 
-          {/* 2. ปุ่มพิเศษสำหรับ Owner เท่านั้น (Cashier + Admin) */}
           {userRole === 'owner' && (
             <>
               <Link href="/cashier" className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-bold shadow-md flex items-center gap-2 transition-transform hover:scale-105">
@@ -198,7 +230,6 @@ export default function Home() {
             </>
           )}
 
-          {/* 3. ปุ่มออกจากระบบ (ทุกคนเห็น) */}
           <button onClick={handleLogout} className="bg-red-50 border border-red-100 hover:bg-red-100 text-red-600 px-3 py-2 rounded-lg shadow-sm flex items-center transition-transform hover:scale-105">
             <LogOut size={20} />
           </button>

@@ -11,6 +11,9 @@ type Props = {
 export default function DashboardTab({ stats, activeTableCount, topItems }: Props) {
   return (
     <div className="animate-in fade-in slide-in-from-bottom-4 duration-300">
+      
+      {/* ❌ ตัดส่วน Header ที่มีปุ่มเปิด/ปิดร้านออกไปแล้ว เพราะมีที่ Admin Page แล้ว */}
+
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
         <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100 flex items-center gap-4">
           <div className="p-3 bg-green-100 text-green-600 rounded-lg"><Banknote size={24}/></div>

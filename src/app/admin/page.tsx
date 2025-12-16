@@ -7,9 +7,8 @@ import {
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { MenuItem, Category, UserProfile, Transaction, TopItem, Discount } from "@/lib/types";
-import { logout } from "@/app/actions"; // ✅ Import logout action
+import { logout } from "@/app/actions"; 
 
-// Import Components
 import AdminLogin from "@/components/admin/AdminLogin";
 import DashboardTab from "@/components/admin/DashboardTab";
 import MenuTab from "@/components/admin/MenuTab";
@@ -19,7 +18,6 @@ import AccountingTab from "@/components/admin/AccountingTab";
 import StaffTab from "@/components/admin/StaffTab";
 import DiscountsTab from "@/components/admin/DiscountsTab";
 
-// ✅ กำหนด Type สำหรับ State และ Data ที่ดึงมา
 type DashboardStats = {
   totalRevenue: number;
   totalOrders: number;
@@ -43,7 +41,6 @@ export default function AdminPage() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [activeTab, setActiveTab] = useState<'dashboard' | 'menu' | 'staff' | 'accounting' | 'reports' | 'discounts' | 'settings'>('dashboard');
 
-  // Global Data State
   const [stats, setStats] = useState<DashboardStats>({ totalRevenue: 0, totalOrders: 0, averageOrderValue: 0 });
   const [topItems, setTopItems] = useState<TopItem[]>([]);
   const [activeTableCount, setActiveTableCount] = useState(0);
@@ -67,8 +64,8 @@ export default function AdminPage() {
     if (menuData) setMenuItems(menuData);
     if (catData) setCategories(catData);
     if (userData) setUsers(userData as UserProfile[]);
-    if (transData) setTransactions(transData as Transaction[]); // ✅ Type casting
-    if (discData) setDiscounts(discData as Discount[]); // ✅ Type casting
+    if (transData) setTransactions(transData as Transaction[]);
+    if (discData) setDiscounts(discData as Discount[]);
     if (storeSettings) setIsStoreOpen(storeSettings.is_open);
     setActiveTableCount(occupiedCount || 0);
 
@@ -82,9 +79,7 @@ export default function AdminPage() {
       .gte("created_at", todayISO);
 
     if (orders) {
-      // ✅ Cast data เพื่อคำนวณ Stats
       const safeOrders = orders as unknown as OrderWithItems[];
-
       const totalRevenue = safeOrders.reduce((sum, o) => sum + (o.total_price || 0), 0);
       setStats({ totalRevenue, totalOrders: safeOrders.length, averageOrderValue: safeOrders.length ? totalRevenue / safeOrders.length : 0 });
 
@@ -107,57 +102,28 @@ export default function AdminPage() {
     const action = isStoreOpen ? "ปิด" : "เปิด";
     if (!confirm(`ยืนยัน "${action}ร้าน"?`)) return;
 
-    if (isStoreOpen) { // Closing shop logic
+    if (isStoreOpen) { // กรณีปิดร้าน
       try {
-        const { data: lastTrans } = await supabase.from("transactions").select("created_at").eq("type", "income").like("description", "ยอดขายปิดร้าน%").order("created_at", { ascending: false }).limit(1).single();
-        let startTime = new Date(); startTime.setHours(0, 0, 0, 0);
-        if (lastTrans) startTime = new Date(lastTrans.created_at);
-
-        // ✅ แก้ไข: ดึง created_at มาด้วย และเรียงตามเวลา (เก่า -> ใหม่) เพื่อหาออเดอร์แรก
-        const { data: orders } = await supabase
-          .from("orders")
-          .select("total_price, created_at")
-          .eq("status", "completed")
-          .gt("created_at", startTime.toISOString())
-          .order("created_at", { ascending: true }); // เรียงเวลาจากน้อยไปมาก
-
-        const totalSales = orders?.reduce((sum, o) => sum + (o.total_price || 0), 0) || 0;
-
-        if (totalSales > 0) {
-          // ✅ ลอจิกใหม่: ใช้วันที่ของ "ออเดอร์แรกสุด" เป็นวันที่บันทึกยอด
-          let recordDate = new Date();
-          
-          if (orders && orders.length > 0) {
-            // ใช้วันที่ของออเดอร์แรกในรอบบิลนี้
-            recordDate = new Date(orders[0].created_at);
-          } else {
-            // (เผื่อกรณีแปลกๆ) ถ้าไม่มีออเดอร์แต่ยอด > 0 ให้ใช้ logic เดิม (ปัดเวลา 6 โมง)
-            const now = new Date();
-            if (now.getHours() < 6) {
-               recordDate.setDate(recordDate.getDate() - 1);
-            }
-          }
-
-          // บังคับให้เวลาเป็น 23:59:59 ของวันที่เปิดร้าน (เพื่อให้ยอดไปอยู่ท้ายสุดของวันนั้นใน Report)
-          recordDate.setHours(23, 59, 59, 999);
-
-          await supabase.from("transactions").insert({ 
-            type: 'income', 
-            amount: totalSales, 
-            description: `ยอดขายปิดร้าน (${recordDate.toLocaleDateString('th-TH')})`, 
-            created_at: recordDate.toISOString() 
-          });
-          
-          alert(`บันทึกยอดขาย ${totalSales.toLocaleString()} ฿ แล้ว (ลงวันที่ ${recordDate.toLocaleDateString('th-TH')})`);
-        } else { 
-          alert("ปิดร้านเรียบร้อย (ไม่มียอดขายใหม่)"); 
+        // ✅ ใช้ RPC สรุปยอดบัญชีเลย เพื่อความชัวร์และง่าย
+        // (ฟังก์ชัน close_shop_day จะทำการคำนวณและ insert transaction ให้)
+        const { error: rpcError } = await supabase.rpc('close_shop_day');
+        
+        if (rpcError) {
+           console.error("RPC Error (Manual Close):", rpcError);
+           alert("❌ เกิดข้อผิดพลาดในการบันทึกยอด (โปรดลองใหม่อีกครั้ง)");
+           return;
         }
+
+        alert("✅ ปิดร้านและบันทึกยอดลงบัญชีเรียบร้อย"); 
+
       } catch (e) { 
         console.error(e); 
         alert("Error summarizing sales"); 
       }
     } else { 
-      alert("เปิดร้านแล้ว"); 
+      // กรณีเปิดร้าน
+      await supabase.from("store_settings").update({ current_business_day: new Date().toISOString() }).eq("id", 1);
+      alert("✅ เปิดร้านเรียบร้อย เริ่มรับออเดอร์ได้เลย!"); 
     }
 
     const newStatus = !isStoreOpen;
@@ -166,7 +132,6 @@ export default function AdminPage() {
     fetchData();
   };
 
-  // ✅ เปลี่ยนฟังก์ชัน Logout ให้ใช้ Server Action
   const handleLogout = async () => {
     await logout();
     window.location.href = "/login";
