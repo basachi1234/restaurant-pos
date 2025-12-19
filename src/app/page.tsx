@@ -17,13 +17,13 @@ export default function Home() {
   const [tables, setTables] = useState<Table[]>([]);
   const [isStoreOpen, setIsStoreOpen] = useState(true);
   const [userRole, setUserRole] = useState<string | null>(null);
+  
+  // ✅ เพิ่ม state กันกดซ้ำ/แสดงสถานะกำลังโหลด
+  const [isProcessing, setIsProcessing] = useState(false);
 
   // Store Info
   const [shopName, setShopName] = useState("ร้านอาหาร");
   const [shopLogo, setShopLogo] = useState<string | null>(null);
-  
-  // ✅ เก็บข้อมูลร้านไว้ใน State เพื่อใช้ใน interval
-  const [storeSettings, setStoreSettings] = useState<any>(null);
 
   const router = useRouter();
 
@@ -49,64 +49,25 @@ export default function Home() {
       .on("postgres_changes", { event: "*", schema: "public", table: "store_settings" }, () => fetchData())
       .subscribe();
 
-    // ✅ เพิ่ม Interval เช็คเวลาทุก 1 นาที
-    const intervalId = setInterval(() => {
-      checkAutoClose(storeSettings);
-    }, 60000); // 60 วินาที
-
     return () => { 
       supabase.removeChannel(channelTables); 
       supabase.removeChannel(channelSettings); 
-      clearInterval(intervalId); // Clear interval
     };
-  }, [storeSettings]); // dependency ใส่ storeSettings เพื่อให้ interval ได้ค่าล่าสุด
+  }, []);
 
   const fetchData = async () => {
-    const { data: tableData } = await supabase.from("tables").select("*").order("id", { ascending: true });
-    if (tableData) setTables(tableData);
+    // ใช้ Promise.all ตรงนี้ด้วยก็ได้เพื่อความเร็วสูงสุด
+    const [tablesRes, settingsRes] = await Promise.all([
+        supabase.from("tables").select("*").order("id", { ascending: true }),
+        supabase.from("store_settings").select("*").eq("id", 1).single()
+    ]);
 
-    const { data: settings } = await supabase.from("store_settings").select("*").eq("id", 1).single();
-    if (settings) {
-      setStoreSettings(settings); // ✅ เก็บค่า setting ล่าสุดไว้
-      checkAutoClose(settings);   // เช็คทันที 1 รอบตอนโหลด
-      
-      setIsStoreOpen(settings.is_open);
-      setShopName(settings.shop_name || "ร้านอาหาร");
-      setShopLogo(settings.shop_logo_url || null);
-    }
-  };
+    if (tablesRes.data) setTables(tablesRes.data);
 
-  // ✅ ฟังก์ชันเช็ค Auto Close แยกออกมา
-  const checkAutoClose = async (settings: any) => {
-    if (!settings || !settings.is_open || !settings.auto_close_time || !settings.current_business_day) return;
-
-    const now = new Date();
-    const businessDate = new Date(settings.current_business_day);
-    const [closeHour, closeMinute] = settings.auto_close_time.split(':').map(Number);
-    
-    const autoCloseDate = new Date(businessDate);
-    if (closeHour < 12) {
-       autoCloseDate.setDate(autoCloseDate.getDate() + 1);
-    }
-    autoCloseDate.setHours(closeHour, closeMinute, 0);
-
-    // ถ้าปัจจุบันเลยเวลาปิดแล้ว
-    if (now > autoCloseDate) {
-      console.log("⏳ เลยเวลา Auto Close -> กำลังปิดร้านอัตโนมัติ...");
-      
-      try {
-        // 1. ✅ เรียก RPC เพื่อบันทึกยอดขายลงบัญชี (เหมือนกดปุ่มปิดร้าน)
-        // หมายเหตุ: เรียก RPC ก่อนปิดร้าน เพื่อให้มั่นใจว่ายอดถูกบันทึก
-        await supabase.rpc('close_shop_day'); 
-
-        // 2. ปิดร้านใน DB
-        await supabase.from("store_settings").update({ is_open: false }).eq("id", 1);
-        
-        setIsStoreOpen(false);
-        console.log("✅ ปิดร้านอัตโนมัติเรียบร้อย");
-      } catch (err) {
-        console.error("Auto Close Error:", err);
-      }
+    if (settingsRes.data) {
+      setIsStoreOpen(settingsRes.data.is_open);
+      setShopName(settingsRes.data.shop_name || "ร้านอาหาร");
+      setShopLogo(settingsRes.data.shop_logo_url || null);
     }
   };
 
@@ -116,25 +77,22 @@ export default function Home() {
   };
 
   const handleTableClick = async (table: Table) => {
-    if (!isStoreOpen) { 
-      alert("⛔ ร้านปิดอยู่ครับ ไม่สามารถเปิดบิลใหม่ได้"); 
-      return; 
-    }
+    // 1. เช็คเบื้องต้น
+    if (!isStoreOpen) return alert("⛔ ร้านปิดอยู่ครับ"); 
+    if (isProcessing) return; // ป้องกันการกดซ้ำขณะกำลังทำงาน
 
-    // Double Check
-    const { data: settings } = await supabase.from("store_settings").select("is_open").eq("id", 1).single();
-    if (settings && settings.is_open === false) { 
-      alert("⛔ ร้านปิดอยู่ครับ"); 
-      setIsStoreOpen(false); 
-      return; 
-    }
+    // ❌ เอาการเช็ค settings ซ้ำออก (เพราะเรามี Realtime คอย update isStoreOpen อยู่แล้ว)
+    // การเช็คซ้ำทำให้เสียเวลา 1 round-trip โดยไม่จำเป็น
 
     if (table.status === "available") {
       const type = table.label.startsWith("TA") ? "สั่งกลับบ้าน (Takeaway)" : "โต๊ะ";
       const confirmOpen = confirm(`เปิดบิล ${type} ${table.label} ?`);
       if (!confirmOpen) return;
 
+      setIsProcessing(true); // เริ่มโหลด
+
       try {
+        // ✅ สร้าง Order พร้อม Update Table (ทำแบบขนานไม่ได้เพราะต้องรอ Order ID แต่เราลดขั้นตอนอื่นแล้ว)
         const { data: newOrder, error: orderError } = await supabase
           .from("orders")
           .insert({ table_id: table.id, status: "active" })
@@ -143,19 +101,18 @@ export default function Home() {
           
         if (orderError) throw orderError;
         
-        const { error: tableError } = await supabase
-          .from("tables")
-          .update({ status: "occupied" })
-          .eq("id", table.id);
-          
-        if (tableError) throw tableError;
+        // อัปเดตสถานะโต๊ะ (ทำแบบ Fire-and-forget ได้ หรือรอให้เสร็จก็ได้)
+        await supabase.from("tables").update({ status: "occupied" }).eq("id", table.id);
         
         router.push(`/order/${newOrder.id}`);
       } catch (error) { 
         console.error("Error opening table:", error); 
         alert("เกิดข้อผิดพลาดในการเปิดบิล"); 
+        setIsProcessing(false); // คืนค่าถ้า Error
       }
     } else {
+      // กรณีโต๊ะไม่ว่าง (ไปหน้าเดิม)
+      setIsProcessing(true);
       const { data: activeOrder } = await supabase
         .from("orders")
         .select("id")
@@ -167,6 +124,7 @@ export default function Home() {
         router.push(`/order/${activeOrder.id}`);
       } else {
         alert("ไม่พบข้อมูลออเดอร์");
+        setIsProcessing(false);
       }
     }
   };
@@ -177,6 +135,7 @@ export default function Home() {
   const TableButton = ({ table, isTakeaway = false }: { table: Table, isTakeaway?: boolean }) => (
     <button
       onClick={() => handleTableClick(table)}
+      disabled={isProcessing} // ปิดปุ่มเมื่อกำลังโหลด
       className={`
         rounded-xl shadow-md font-bold transition-all transform hover:scale-105 active:scale-95
         flex flex-col items-center justify-center border-2 relative overflow-hidden
@@ -189,8 +148,10 @@ export default function Home() {
             : "bg-gray-100 border-gray-300 text-gray-400 cursor-not-allowed"
           : "bg-red-500 border-red-600 text-white"
         }
+        ${isProcessing ? 'opacity-50 cursor-wait' : ''} 
       `}
     >
+      {/* ... เนื้อหาปุ่มเหมือนเดิม ... */}
       <span className="z-10 text-xl">{isTakeaway ? <ShoppingBag className="mx-auto mb-1 w-6 h-6" /> : null} {table.label}</span>
       <span className="text-xs font-normal mt-1 opacity-80 z-10">
         {table.status === "available" ? (isStoreOpen ? "ว่าง" : "ปิด") : "กำลังรอ..."}
@@ -201,10 +162,11 @@ export default function Home() {
 
   return (
     <div className="min-h-screen bg-gray-50 p-6">
-
-      {/* Header */}
+       {/* ... ส่วน Render เหมือนเดิม ... */}
+       {/* Header */}
       <div className="flex flex-col md:flex-row justify-between items-center mb-6 gap-4">
         <div className="flex items-center gap-3">
+          {/* Logo */}
           {shopLogo ? (
             <img src={shopLogo} alt="Logo" className="w-12 h-12 rounded-full object-cover border shadow-sm" />
           ) : (
@@ -215,10 +177,12 @@ export default function Home() {
         </div>
 
         <div className="flex gap-3 flex-wrap justify-center">
+          {/* 1. ปุ่มครัว (ทุกคนเห็น) */}
           <Link href="/kitchen" className="bg-gray-800 hover:bg-black text-white px-4 py-2 rounded-lg font-bold shadow-md flex items-center gap-2 transition-transform hover:scale-105">
             👨‍🍳 ครัว
           </Link>
 
+          {/* 2. ปุ่มพิเศษสำหรับ Owner เท่านั้น (Cashier + Admin) */}
           {userRole === 'owner' && (
             <>
               <Link href="/cashier" className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-bold shadow-md flex items-center gap-2 transition-transform hover:scale-105">
@@ -230,6 +194,7 @@ export default function Home() {
             </>
           )}
 
+          {/* 3. ปุ่มออกจากระบบ (ทุกคนเห็น) */}
           <button onClick={handleLogout} className="bg-red-50 border border-red-100 hover:bg-red-100 text-red-600 px-3 py-2 rounded-lg shadow-sm flex items-center transition-transform hover:scale-105">
             <LogOut size={20} />
           </button>
@@ -259,7 +224,6 @@ export default function Home() {
           {takeawayTables.map(table => <TableButton key={table.id} table={table} isTakeaway={true} />)}
         </div>
       </div>
-
     </div>
   );
 }
