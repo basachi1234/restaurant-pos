@@ -12,8 +12,8 @@ export default function SettingsTab() {
   const [totalTakeawayTables, setTotalTakeawayTables] = useState<number | string>(0);
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
-
-  // ✅ เพิ่ม State เวลาปิดร้านอัตโนมัติ
+  
+  // ✅ State สำหรับเวลาปิดร้านอัตโนมัติ
   const [autoCloseTime, setAutoCloseTime] = useState("03:00");
 
   // Cleanup
@@ -29,7 +29,7 @@ export default function SettingsTab() {
       setPromptPayId(settings.promptpay_id || "");
       setShopLogo(settings.shop_logo_url);
       
-      // ✅ ดึงค่าเวลามาใส่ (ตัดเอาแค่ HH:mm)
+      // ✅ ดึงเวลาปิดร้านมาแสดง
       if (settings.auto_close_time) {
         setAutoCloseTime(settings.auto_close_time.slice(0, 5));
       }
@@ -48,7 +48,7 @@ export default function SettingsTab() {
       let url = shopLogo;
       if (logoFile) url = await resizeAndUploadImage(logoFile);
 
-      // ✅ บันทึก auto_close_time ลง DB
+      // ✅ บันทึกข้อมูลรวมถึงเวลาปิดร้านอัตโนมัติ
       await supabase.from("store_settings").update({ 
         shop_name: shopName, 
         promptpay_id: promptPayId, 
@@ -87,13 +87,23 @@ export default function SettingsTab() {
   };
 
   const handleCleanup = async () => {
-    // 1. ตรวจสอบสถานะร้าน (เปลี่ยนมาใช้ field ใหม่ is_shop_open)
-    const { data: settings } = await supabase.from("store_settings").select("is_shop_open").eq("id", 1).single();
-    if (settings?.is_shop_open) {
-      return alert("⛔ ไม่สามารถล้างข้อมูลได้: ระบบแจ้งว่า 'ร้านยังเปิดอยู่'\nกรุณากด 'ปิดร้าน' ที่หน้า Dashboard ก่อนทำรายการครับ");
+    // ✅ 1. ตรวจสอบสถานะร้านจาก Database โดยตรง
+    const { data: settings, error } = await supabase.from("store_settings").select("is_open").eq("id", 1).single();
+    
+    if (error) {
+      console.error("Check status error:", error);
+      return alert("❌ ไม่สามารถตรวจสอบสถานะร้านได้ (อาจเกิดจากอินเทอร์เน็ต) กรุณาลองใหม่");
     }
 
-    // 2. ตรวจสอบว่ามีโต๊ะค้างอยู่ไหม
+    // ถ้า Database บอกว่า "เปิดอยู่"
+    if (settings?.is_open) {
+      // ✅ เพิ่ม Logic บังคับลบ: ถาม User ว่าจะฝืนทำต่อไหม
+      const force = confirm("⚠️ ระบบแจ้งว่า 'ร้านยังเปิดอยู่' (สถานะใน Database เป็น Open)\n\nหากคุณมั่นใจว่าร้านปิดแล้วจริงๆ และต้องการบังคับล้างข้อมูล ให้กด 'ตกลง' (OK)");
+      
+      if (!force) return; // ถ้า user กด ยกเลิก ก็จบการทำงาน
+    }
+
+    // ✅ 2. ตรวจสอบว่ามีโต๊ะค้างอยู่ไหม (อันนี้สำคัญ ห้ามฝืน)
     const { count: occupiedCount } = await supabase.from("tables").select("*", { count: 'exact', head: true }).eq("status", "occupied");
     if (occupiedCount && occupiedCount > 0) {
       return alert(`⛔ ไม่สามารถล้างข้อมูลได้: ยังมีลูกค้าใช้งานอยู่ ${occupiedCount} โต๊ะ\nกรุณาเคลียร์โต๊ะให้ว่างทั้งหมดก่อนครับ`);
@@ -108,6 +118,7 @@ export default function SettingsTab() {
     try {
       const cutOff = new Date(cleanupDate).toISOString();
 
+      // 1. ลบรายการอาหารในบิลเก่า
       const { data: oldOrders, error: fetchError } = await supabase
         .from('orders')
         .select('id')
@@ -135,6 +146,7 @@ export default function SettingsTab() {
         if (orderError) throw orderError;
       }
 
+      // 2. ลบ Transactions เก่า
       const { error: transError } = await supabase
         .from('transactions')
         .delete()
@@ -166,13 +178,13 @@ export default function SettingsTab() {
             
             <div><label className="font-bold text-sm text-gray-600 block mb-1">โลโก้</label><input type="file" accept="image/*" onChange={e => { if (e.target.files?.[0]) setLogoFile(e.target.files[0]) }} className="w-full border p-2 rounded text-sm bg-gray-50" />{shopLogo && !logoFile && <img src={shopLogo} className="h-16 mt-2 border p-1 rounded" alt="Logo" />}</div>
 
-            {/* ✅ เพิ่มช่องตั้งเวลาปิดร้าน (Auto Close) ตรงนี้ */}
+            {/* ✅ ส่วนตั้งเวลาปิดร้าน (Auto Close) */}
             <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
                <label className="font-bold text-sm text-gray-700 mb-1 flex items-center gap-2">
                  <Clock size={16} className="text-blue-600"/> เวลาปิดร้านอัตโนมัติ (Auto Close)
                </label>
                <div className="text-xs text-gray-500 mb-2">
-                 *เมื่อถึงเวลานี้ ร้านจะเปลี่ยนสถานะเป็น "ปิด" โดยอัตโนมัติ และบล็อกไม่ให้เปิดบิลเพิ่ม
+                 *เมื่อถึงเวลานี้ ระบบจะปิดร้านให้อัตโนมัติหากลืมกดปิด
                </div>
                <input 
                  type="time" 

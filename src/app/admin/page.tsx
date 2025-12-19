@@ -7,8 +7,9 @@ import {
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { MenuItem, Category, UserProfile, Transaction, TopItem, Discount } from "@/lib/types";
-import { logout } from "@/app/actions"; 
+import { logout } from "@/app/actions";
 
+// Import Components
 import AdminLogin from "@/components/admin/AdminLogin";
 import DashboardTab from "@/components/admin/DashboardTab";
 import MenuTab from "@/components/admin/MenuTab";
@@ -41,6 +42,7 @@ export default function AdminPage() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [activeTab, setActiveTab] = useState<'dashboard' | 'menu' | 'staff' | 'accounting' | 'reports' | 'discounts' | 'settings'>('dashboard');
 
+  // Global Data State
   const [stats, setStats] = useState<DashboardStats>({ totalRevenue: 0, totalOrders: 0, averageOrderValue: 0 });
   const [topItems, setTopItems] = useState<TopItem[]>([]);
   const [activeTableCount, setActiveTableCount] = useState(0);
@@ -49,6 +51,8 @@ export default function AdminPage() {
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [discounts, setDiscounts] = useState<Discount[]>([]);
+  
+  // State สถานะร้าน
   const [isStoreOpen, setIsStoreOpen] = useState(true);
 
   const fetchData = async () => {
@@ -98,38 +102,63 @@ export default function AdminPage() {
 
   useEffect(() => { if (isAuthenticated) fetchData(); }, [isAuthenticated]);
 
+  // ✅ ฟังก์ชัน Toggle เปิด/ปิดร้าน (ปรับปรุงใหม่)
   const toggleStoreStatus = async () => {
     const action = isStoreOpen ? "ปิด" : "เปิด";
+    
+    // ถ้าจะปิดร้าน เช็คโต๊ะค้างก่อน
+    if (isStoreOpen && activeTableCount > 0) {
+      return alert(`⚠️ ยังมีลูกค้าใช้งานอยู่ ${activeTableCount} โต๊ะ\nกรุณาเคลียร์โต๊ะก่อนปิดร้าน`);
+    }
+
     if (!confirm(`ยืนยัน "${action}ร้าน"?`)) return;
 
-    if (isStoreOpen) { // กรณีปิดร้าน
+    // 1. ดำเนินการตามลอจิก (สรุปยอด หรือ เริ่มวันใหม่)
+    if (isStoreOpen) { 
+      // --- กรณีปิดร้าน (Closing shop logic) ---
       try {
-        // ✅ ใช้ RPC สรุปยอดบัญชีเลย เพื่อความชัวร์และง่าย
-        // (ฟังก์ชัน close_shop_day จะทำการคำนวณและ insert transaction ให้)
+        // ใช้ RPC เพื่อสรุปยอดและบันทึกลง Transactions
         const { error: rpcError } = await supabase.rpc('close_shop_day');
         
         if (rpcError) {
-           console.error("RPC Error (Manual Close):", rpcError);
-           alert("❌ เกิดข้อผิดพลาดในการบันทึกยอด (โปรดลองใหม่อีกครั้ง)");
-           return;
+          console.error("RPC Error:", rpcError);
+          // ถ้าสรุปยอดไม่ผ่าน ให้หยุดและแจ้งเตือน ไม่ฝืนปิดร้าน
+          return alert("❌ เกิดข้อผิดพลาดในการสรุปยอดบัญชี กรุณาลองใหม่อีกครั้ง");
         }
-
-        alert("✅ ปิดร้านและบันทึกยอดลงบัญชีเรียบร้อย"); 
+        
+        alert("✅ สรุปยอดและบันทึกบัญชีเรียบร้อย"); 
 
       } catch (e) { 
         console.error(e); 
-        alert("Error summarizing sales"); 
+        return alert("เกิดข้อผิดพลาดในการสรุปยอด"); 
       }
     } else { 
-      // กรณีเปิดร้าน
-      await supabase.from("store_settings").update({ current_business_day: new Date().toISOString() }).eq("id", 1);
+      // --- กรณีเปิดร้าน (Opening shop logic) ---
+      const { error: openError } = await supabase.from("store_settings").update({ current_business_day: new Date().toISOString() }).eq("id", 1);
+      
+      if (openError) {
+        console.error("Open Shop Error:", openError);
+        return alert("❌ ไม่สามารถเปิดร้านได้ กรุณาลองใหม่");
+      }
+      
       alert("✅ เปิดร้านเรียบร้อย เริ่มรับออเดอร์ได้เลย!"); 
     }
 
+    // 2. ✅ อัปเดตสถานะ "เปิด/ปิด" ลง DB และเช็ค Error อย่างเคร่งครัด
     const newStatus = !isStoreOpen;
-    await supabase.from("store_settings").update({ is_open: newStatus }).eq("id", 1);
+    const { error: updateError } = await supabase
+      .from("store_settings")
+      .update({ is_open: newStatus })
+      .eq("id", 1);
+
+    if (updateError) {
+      console.error("Update Status Error:", updateError);
+      return alert("❌ ไม่สามารถบันทึกสถานะร้านได้ (อินเทอร์เน็ตอาจมีปัญหา) กรุณาลองกดใหม่อีกครั้ง");
+    }
+
+    // 3. ถ้าผ่านทุกด่าน ค่อยเปลี่ยนสีปุ่มที่หน้าจอ
     setIsStoreOpen(newStatus);
-    fetchData();
+    fetchData(); // ดึงข้อมูลล่าสุดเพื่อความชัวร์
   };
 
   const handleLogout = async () => {
@@ -143,21 +172,25 @@ export default function AdminPage() {
     <div className="min-h-screen bg-gray-50 p-6 pb-20">
       <div className="max-w-6xl mx-auto">
         {/* Header */}
-        <div className="flex flex-col md:flex-row justify-between items-center mb-8 bg-white p-4 rounded-xl shadow-sm border border-gray-100">
+        <div className="flex flex-col md:flex-row justify-between items-center mb-8 bg-white p-4 rounded-xl shadow-sm border border-gray-100 print:hidden">
           <div className="flex items-center gap-4 mb-4 md:mb-0">
             <button onClick={() => router.push("/")} className="p-2 bg-gray-100 rounded-full hover:bg-gray-200"><ArrowLeft size={20} /></button>
             <div><h1 className="text-2xl font-bold text-gray-800">Restaurant Manager</h1></div>
           </div>
           <div className="flex items-center gap-3">
-            <button onClick={toggleStoreStatus} className={`flex items-center gap-2 px-4 py-2 rounded-lg font-bold text-sm shadow-sm ${isStoreOpen ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-              <Power size={16} /> {isStoreOpen ? "ร้านเปิด" : "ร้านปิด"}
+            {/* ปุ่มเปิด/ปิดร้าน */}
+            <button 
+              onClick={toggleStoreStatus} 
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg font-bold text-sm shadow-sm transition-all active:scale-95 ${isStoreOpen ? 'bg-green-100 text-green-700 hover:bg-green-200' : 'bg-red-100 text-red-700 hover:bg-red-200'}`}
+            >
+              <Power size={16} /> {isStoreOpen ? "ร้านเปิด (สั่งปิด)" : "ร้านปิด (สั่งเปิด)"}
             </button>
-            <button onClick={handleLogout} className="bg-gray-800 text-white px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2"><LockKeyhole size={16} /> ออก</button>
+            <button onClick={handleLogout} className="bg-gray-800 text-white px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2 hover:bg-black"><LockKeyhole size={16} /> ออก</button>
           </div>
         </div>
 
         {/* Tabs Navigation */}
-        <div className="flex gap-2 mb-6 overflow-x-auto pb-2 no-scrollbar">
+        <div className="flex gap-2 mb-6 overflow-x-auto pb-2 no-scrollbar print:hidden">
           <button onClick={() => setActiveTab('dashboard')} className={`px-5 py-2 rounded-full font-bold flex items-center gap-2 text-sm whitespace-nowrap ${activeTab === 'dashboard' ? 'bg-blue-600 text-white' : 'bg-white text-gray-600'}`}><TrendingUp size={16} /> ภาพรวม</button>
           <button onClick={() => setActiveTab('reports')} className={`px-5 py-2 rounded-full font-bold flex items-center gap-2 text-sm whitespace-nowrap ${activeTab === 'reports' ? 'bg-blue-600 text-white' : 'bg-white text-gray-600'}`}><FileText size={16} /> รายงาน</button>
           <button onClick={() => setActiveTab('accounting')} className={`px-5 py-2 rounded-full font-bold flex items-center gap-2 text-sm whitespace-nowrap ${activeTab === 'accounting' ? 'bg-blue-600 text-white' : 'bg-white text-gray-600'}`}><Wallet size={16} /> บัญชี</button>
