@@ -1,6 +1,5 @@
 import { Printer, TicketPercent, AlertTriangle, ChefHat, Ban, CheckCircle, Check } from "lucide-react";
 
-// Types ... (เหมือนเดิม)
 type ItemDetail = {
   name: string;
   quantity: number;
@@ -60,8 +59,7 @@ export default function ReceiptPreview({
   
   if (!selectedOrder) {
     return (
-      // ✅ ปรับขนาด Placeholder ให้เท่าใบเสร็จจริง (ประมาณ 300px)
-      <div className="w-full md:w-[300px] bg-white rounded-xl shadow-lg p-6 flex flex-col items-center justify-center text-gray-400 min-h-[300px]">
+      <div className="w-full md:w-[320px] bg-white rounded-xl shadow-lg p-6 flex flex-col items-center justify-center text-gray-400 min-h-[300px]">
         <div className="text-6xl mb-4">👈</div>
         <p>เลือกโต๊ะเพื่อเช็คบิล</p>
       </div>
@@ -69,8 +67,8 @@ export default function ReceiptPreview({
   }
 
   return (
-    // ✅ กำหนดความกว้างคงที่ 300px (ประมาณ 58mm + เผื่อขอบ) เพื่อให้ดูเป็นสลิปยาวๆ
-    <div className="w-full md:w-[300px] bg-white rounded-xl shadow-lg p-3 relative h-fit flex-shrink-0">
+    // ✅ แก้ไข: เพิ่ม 'print:static' และ 'print:p-0' เพื่อแก้ปัญหาพื้นที่ว่างด้านบน
+    <div className="w-full md:w-[320px] bg-white rounded-xl shadow-lg p-3 relative h-fit flex-shrink-0 print:static print:shadow-none print:p-0 print:m-0 print:bg-transparent">
       
       {(selectedOrder.isReprint || isPaymentSuccess) && (
          <div className="absolute top-3 right-3 bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full text-[10px] font-bold print:hidden">
@@ -79,8 +77,11 @@ export default function ReceiptPreview({
       )}
 
       <div>
-        {/* ส่วนเนื้อหาใบเสร็จ (ลด padding เหลือ p-2 ให้พอดีกับหน้ากว้างที่แคบลง) */}
-        <div id="receipt-area" className="w-full mx-auto border p-2 text-sm bg-white mb-4 print:border-none print:w-full print:max-w-none print:p-0 print:m-0">
+        <div 
+          id="receipt-area" 
+          className="w-full mx-auto border py-4 px-5 text-sm bg-white mb-4 
+                     print:border-none print:w-full print:max-w-none print:py-0 print:px-[5mm] print:m-0 print:absolute print:top-0 print:left-0"
+        >
           <div className="text-center mb-3">
             {shopLogo && <img src={shopLogo} className="h-12 mx-auto mb-2 object-contain" alt="Logo" />}
             <div className="font-bold text-lg mb-0.5">{shopName}</div>

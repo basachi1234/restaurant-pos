@@ -40,7 +40,6 @@ type Discount = {
   value: number;
 };
 
-// Component ไส้ใน
 function CashierContent() {
   const searchParams = useSearchParams(); 
   
@@ -54,7 +53,6 @@ function CashierContent() {
   const [discounts, setDiscounts] = useState<Discount[]>([]);
   const [selectedDiscountId, setSelectedDiscountId] = useState<number | "">("");
 
-  // ✅ เพิ่มสถานะเช็คว่าจ่ายเงินเสร็จหรือยัง
   const [isPaymentSuccess, setIsPaymentSuccess] = useState(false);
 
   // Payment State
@@ -217,7 +215,7 @@ function CashierContent() {
     setSelectedDiscountId(""); 
     setCashReceived(""); 
     setPaymentMethod("transfer");
-    setIsPaymentSuccess(false); // ✅ รีเซ็ตสถานะจ่ายเงินเมื่อเลือกโต๊ะใหม่
+    setIsPaymentSuccess(false);
     
     setSelectedOrder({
       order_id: order.id, table_label: tableLabel, table_id: tableId,
@@ -243,7 +241,7 @@ function CashierContent() {
     });
     setCurrentReceiptNo(receiptNo || "-");
     setShowHistoryModal(false); setSelectedDiscountId(""); setPaymentMethod('transfer');
-    setIsPaymentSuccess(true); // ประวัติคือจ่ายแล้ว
+    setIsPaymentSuccess(true);
   };
 
   const handleVoidBill = async () => {
@@ -278,10 +276,8 @@ function CashierContent() {
       setCurrentReceiptNo(receiptNo); 
       setShowPaymentModal(false);
       
-      // ✅ แก้ไข: ตัด window.print() อัตโนมัติออก เพื่อป้องกัน iOS ค้าง
-      // ✅ แก้ไข: ไม่รีเซ็ต selectedOrder ทันที แต่เปลี่ยนสถานะเป็น "จ่ายแล้ว"
       setIsPaymentSuccess(true);
-      fetchOccupiedTables(); // อัปเดตรายการโต๊ะ (โต๊ะนี้จะหายไปจากลิสต์ซ้ายมือ)
+      fetchOccupiedTables();
       
       alert(`✅ ปิดบิลเรียบร้อย!\n(ยอดสุทธิ: ${data.grand_total.toLocaleString()} ฿)`);
 
@@ -292,7 +288,6 @@ function CashierContent() {
     }
   };
 
-  // ✅ ฟังก์ชันใหม่สำหรับปุ่ม "จบรายการ" (กดเมื่อพิมพ์เสร็จแล้ว หรือไม่ต้องการพิมพ์)
   const handleFinishOrder = () => {
     setSelectedOrder(null);
     setIsPaymentSuccess(false);
@@ -303,7 +298,6 @@ function CashierContent() {
   const minDate = useMemo(() => { const d = new Date(); d.setDate(d.getDate() - 30); return d.toISOString().split('T')[0]; }, []);
 
   return (
-    // ✅ 1. เพิ่ม padding รอบนอกเป็น p-4 เพื่อให้ห่างจากขอบมากขึ้น
     <div className="min-h-screen bg-gray-100 p-4 flex flex-col gap-4">
       
       {/* Header */}
@@ -327,10 +321,8 @@ function CashierContent() {
         </button>
       </div>
 
-      {/* ✅ 2. Layout หลัก: ใช้ justify-center เพื่อจัดกึ่งกลาง และ gap-3 ให้ชิดกัน */}
       <div className="flex flex-col md:flex-row gap-3 items-start flex-1 justify-center">
           
-          {/* ✅ 3. รายการโต๊ะ: กำหนดความกว้าง Fixed 450px เพื่อให้คงที่และดูสมดุลกับใบเสร็จ */}
           <div className="w-full md:w-[450px] flex-shrink-0">
             <TableList 
               tables={occupiedTables} selectedTableId={selectedOrder?.table_id} isReprintMode={selectedOrder?.isReprint}
@@ -338,7 +330,6 @@ function CashierContent() {
             />
           </div>
 
-          {/* ✅ 4. ใบเสร็จ: ใช้ w-auto เพื่อให้ขนาดเป็นไปตามที่กำหนดใน ReceiptPreview (300px) */}
           <div className="w-full md:w-auto flex-shrink-0">
             <ReceiptPreview 
               selectedOrder={selectedOrder} calculation={calculation} shopName={shopName} shopLogo={shopLogo}
@@ -346,8 +337,6 @@ function CashierContent() {
               cashReceived={cashReceived} changeAmount={changeAmount} discounts={discounts}
               selectedDiscountId={selectedDiscountId} onSelectDiscount={setSelectedDiscountId}
               onPrint={() => window.print()} onVoid={handleVoidBill} onOpenPayment={() => setShowPaymentModal(true)}
-              
-              // ✅ ส่ง Props ใหม่ไปให้ ReceiptPreview
               isPaymentSuccess={isPaymentSuccess}
               onFinishOrder={handleFinishOrder}
             />
@@ -370,19 +359,18 @@ function CashierContent() {
         />
       )}
       
-      {/* ✅ ปรับ CSS Print: ไม่ลบขอบกระดาษ (ลบ margin: 0 ของ @page ออก) แต่ยังคง fix position เพื่อให้ใบเสร็จอยู่หน้าแรกเสมอ */}
+      {/* ✅ ปรับ CSS Global สำหรับ Print */}
       <style jsx global>{`
         @media print {
           @page {
-            /* ❌ เอา margin: 0; ออก เพื่อให้เครื่องพิมพ์ใช้ขอบ Default */
             size: auto;
+            margin: 0mm; 
           }
           
           html, body {
             height: auto;
             overflow: visible;
             background: white;
-            /* ❌ เอา margin: 0 !important; ของ body ออกด้วยก็ได้ครับ ถ้าอยากให้มีขอบ */
             margin: 0; 
             padding: 0;
           }
@@ -396,12 +384,13 @@ function CashierContent() {
           }
 
           #receipt-area {
-            position: fixed; /* ยังคงใช้ fixed เพื่อให้เกาะมุมซ้ายบนของ "พื้นที่พิมพ์" */
-            left: 0;
-            top: 0;
-            width: 100%;
+            position: fixed; /* ✅ ใช้ fixed เพื่อบังคับเกาะมุมซ้ายบนของกระดาษเสมอ */
+            left: 0 !important;
+            top: 0 !important;
+            width: 100% !important; /* เต็มความกว้างพื้นที่พิมพ์ที่เหลือ (margin 0) */
             z-index: 9999;
-            /* เอา margin ออก ให้เป็นไปตาม @page */
+            margin: 0 !important;
+            padding: 0 5mm !important; /* บังคับ Padding ซ้ายขวาที่นี่อีกทีเพื่อความชัวร์ */
           }
 
           * {
