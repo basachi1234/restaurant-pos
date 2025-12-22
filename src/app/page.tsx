@@ -122,46 +122,39 @@ export default function Home() {
   const takeawayTables = tables.filter(t => t.label.startsWith("TA"));
   const dineInTables = tables.filter(t => !t.label.startsWith("TA"));
 
-  // ✅ Helper: เลือก class สีของปุ่มตามสถานะ (DaisyUI style)
   const getTableColor = (status: string, isTakeaway: boolean, isOpen: boolean) => {
-    if (status === 'occupied') return 'btn-error text-white'; // โต๊ะไม่ว่าง (สีแดง)
-    if (!isOpen) return 'btn-disabled opacity-50'; // ร้านปิด
-    if (isTakeaway) return 'btn-outline btn-warning hover:btn-warning hover:text-white'; // สั่งกลับบ้าน (เหลือง)
-    return 'btn-outline btn-success hover:btn-success hover:text-white'; // ทานที่ร้าน (เขียว)
+    if (status === 'occupied') return 'btn-error text-white'; 
+    if (!isOpen) return 'btn-disabled opacity-50'; 
+    if (isTakeaway) return 'btn-outline btn-warning hover:btn-warning hover:text-white';
+    return 'btn-outline btn-success hover:btn-success hover:text-white';
   };
 
-  // ✅ Component ปุ่มโต๊ะ ปรับใหม่ใช้ DaisyUI btn
   const TableButton = ({ table, isTakeaway = false }: { table: Table, isTakeaway?: boolean }) => (
     <button
       onClick={() => handleTableClick(table)}
       disabled={isProcessing}
       className={`
-        btn h-auto min-h-[2rem] flex-col flex-nowrap gap-1 relative overflow-hidden shadow-sm transition-all hover:scale-105 active:scale-95
+        btn h-auto min-h-[6rem]
+        flex-col flex-nowrap gap-1 relative overflow-hidden shadow-sm transition-all hover:scale-105 active:scale-95
         ${getTableColor(table.status, isTakeaway, isStoreOpen)}
         aspect-[3/2]
       `}
     >
-      {/* Icon & Label */}
       <span className="z-10 text-xl font-bold flex flex-col items-center">
         {isTakeaway && <ShoppingBag className="w-5 h-5 mb-1" />} 
         {table.label}
       </span>
-      
-      {/* Status Text */}
       <span className="text-xs font-normal opacity-80 z-10 capitalize">
         {table.status === "available" ? (isStoreOpen ? "ว่าง" : "ปิด") : "ไม่ว่าง"}
       </span>
-
-      {/* Loading Indicator (ทับปุ่มเมื่อกำลังโหลด) */}
       {isProcessing && <span className="loading loading-spinner absolute inset-0 m-auto bg-black/20 rounded-lg"></span>}
     </button>
   );
 
   return (
-    // ✅ ใช้ bg-base-200 เป็นพื้นหลังหลัก
     <div className="min-h-screen bg-base-200 p-4 md:p-6 pb-20">
       
-      {/* ✅ Header: ใช้ Navbar component ของ DaisyUI */}
+      {/* Header */}
       <div className="navbar bg-base-100 rounded-box shadow-sm mb-6 px-4">
         <div className="flex-1 gap-3">
            <div className="avatar">
@@ -185,7 +178,8 @@ export default function Home() {
            </div>
         </div>
 
-        <div className="flex-none gap-2">
+        {/* ✅ เพิ่ม class 'flex items-center' ตรงนี้ครับ Gap จะทำงานแล้ว */}
+        <div className="flex-none flex items-center gap-2">
            {/* ปุ่มครัว */}
            <Link href="/kitchen" className="btn btn-neutral btn-sm md:btn-md shadow-sm">
              👨‍🍳 <span className="hidden md:inline">ครัว</span>
@@ -198,7 +192,7 @@ export default function Home() {
                 💵 <span className="hidden md:inline">แคชเชียร์</span>
               </Link>
               <Link href="/admin" className="btn btn-ghost btn-circle" title="ตั้งค่า">
-                <Settings size={20} />
+                <Settings size={18} />
               </Link>
             </>
           )}
@@ -210,7 +204,6 @@ export default function Home() {
         </div>
       </div>
 
-      {/* ✅ Alert: แจ้งเตือนเมื่อร้านปิด */}
       {!isStoreOpen && (
         <div className="alert alert-error shadow-lg mb-6 text-white">
           <Lock />
@@ -226,7 +219,6 @@ export default function Home() {
         <h2 className="text-xl font-bold text-base-content mb-4 flex items-center gap-2">
           <Utensils className="text-success" /> ทานที่ร้าน (Dine-in)
         </h2>
-        {/* ใช้ Grid เหมือนเดิม แต่ปุ่มข้างในเป็น DaisyUI แล้ว */}
         <div className={`grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 ${!isStoreOpen ? 'opacity-60 pointer-events-none' : ''}`}>
           {dineInTables.map(table => <TableButton key={table.id} table={table} />)}
         </div>
