@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
@@ -23,7 +23,60 @@ export default function Home() {
   const [shopName, setShopName] = useState("ร้านอาหาร");
   const [shopLogo, setShopLogo] = useState<string | null>(null);
 
+  // ✅ 1. เพิ่ม State เก็บเวลาเปิด-ปิดอัตโนมัติ
+  const [autoOpenTime, setAutoOpenTime] = useState<string | null>(null);
+  const [autoCloseTime, setAutoCloseTime] = useState<string | null>(null);
+
   const router = useRouter();
+
+  // ✅ 2. ฟังก์ชันเช็คว่าตอนนี้ร้านควรเปิดหรือไม่ (ตามเวลา)
+  const checkIsShopOpenByTime = useCallback((openTime: string, closeTime: string) => {
+    const now = new Date();
+    const currentMinutes = now.getHours() * 60 + now.getMinutes();
+    
+    const [openH, openM] = openTime.split(':').map(Number);
+    const startMinutes = openH * 60 + openM;
+    
+    const [closeH, closeM] = closeTime.split(':').map(Number);
+    const endMinutes = closeH * 60 + closeM;
+
+    // กรณีร้านเปิดข้ามวัน (เช่น ปิดตี 2 -> endMinutes น้อยกว่า startMinutes)
+    if (endMinutes < startMinutes) {
+      return currentMinutes >= startMinutes || currentMinutes < endMinutes;
+    }
+    
+    // กรณีเปิดปิดในวันเดียว (เช่น 10:00 - 22:00)
+    return currentMinutes >= startMinutes && currentMinutes < endMinutes;
+  }, []);
+
+  // ✅ 3. ปรับปรุง fetchData ให้ดึงเวลาและคำนวณสถานะเริ่มต้น
+  const fetchData = useCallback(async () => {
+    const [tablesRes, settingsRes] = await Promise.all([
+        supabase.from("tables").select("*").order("id", { ascending: true }),
+        supabase.from("store_settings").select("*").eq("id", 1).single()
+    ]);
+
+    if (tablesRes.data) setTables(tablesRes.data);
+
+    if (settingsRes.data) {
+      // เก็บค่าเวลาไว้ใน State
+      setAutoOpenTime(settingsRes.data.auto_open_time);
+      setAutoCloseTime(settingsRes.data.auto_close_time);
+      
+      setShopName(settingsRes.data.shop_name || "ร้านอาหาร");
+      setShopLogo(settingsRes.data.shop_logo_url || null);
+
+      // คำนวณสถานะร้าน: ต้องเปิดทั้งใน DB และ ตามเวลา (ถ้าตั้งไว้)
+      const dbIsOpen = settingsRes.data.is_open;
+      let timeIsOpen = true;
+
+      if (settingsRes.data.auto_open_time && settingsRes.data.auto_close_time) {
+         timeIsOpen = checkIsShopOpenByTime(settingsRes.data.auto_open_time, settingsRes.data.auto_close_time);
+      }
+
+      setIsStoreOpen(dbIsOpen && timeIsOpen);
+    }
+  }, [checkIsShopOpenByTime]);
 
   useEffect(() => {
     const checkUser = async () => {
@@ -51,22 +104,28 @@ export default function Home() {
       supabase.removeChannel(channelTables); 
       supabase.removeChannel(channelSettings); 
     };
-  }, []);
+  }, [fetchData]);
 
-  const fetchData = async () => {
-    const [tablesRes, settingsRes] = await Promise.all([
-        supabase.from("tables").select("*").order("id", { ascending: true }),
-        supabase.from("store_settings").select("*").eq("id", 1).single()
-    ]);
+  // ✅ 4. เพิ่ม Interval เช็คเวลาทุก 1 นาที (Auto Close หน้าบ้าน)
+  useEffect(() => {
+    if (!autoOpenTime || !autoCloseTime) return;
 
-    if (tablesRes.data) setTables(tablesRes.data);
+    const interval = setInterval(() => {
+      const isOpenByTime = checkIsShopOpenByTime(autoOpenTime, autoCloseTime);
+      
+      // ถ้าเวลาบอกว่าปิดแล้ว แต่หน้าจอยังแสดงว่าเปิดอยู่ -> สั่งปิดเลย
+      if (!isOpenByTime && isStoreOpen) {
+        setIsStoreOpen(false);
+      }
+      // ถ้าถึงเวลาเปิด แล้วหน้าจอยังปิดอยู่ -> โหลดข้อมูลใหม่ (เผื่อสถานะใน DB เปลี่ยน)
+      else if (isOpenByTime && !isStoreOpen) {
+         fetchData(); 
+      }
+    }, 60000); // เช็คทุก 1 นาที
 
-    if (settingsRes.data) {
-      setIsStoreOpen(settingsRes.data.is_open);
-      setShopName(settingsRes.data.shop_name || "ร้านอาหาร");
-      setShopLogo(settingsRes.data.shop_logo_url || null);
-    }
-  };
+    return () => clearInterval(interval);
+  }, [autoOpenTime, autoCloseTime, isStoreOpen, checkIsShopOpenByTime, fetchData]);
+
 
   const handleLogout = async () => {
     await logout();
@@ -74,6 +133,15 @@ export default function Home() {
   };
 
   const handleTableClick = async (table: Table) => {
+    // ✅ 5. เช็คเวลาอีกครั้งก่อนกด (Lazy Check) กันคนเปิดหน้าค้างไว้
+    if (autoOpenTime && autoCloseTime) {
+       const isOpenByTime = checkIsShopOpenByTime(autoOpenTime, autoCloseTime);
+       if (!isOpenByTime) {
+          setIsStoreOpen(false); 
+          return alert("⛔ ร้านปิดให้บริการแล้วครับ (หมดเวลาทำการ)");
+       }
+    }
+
     if (!isStoreOpen) return alert("⛔ ร้านปิดอยู่ครับ"); 
     if (isProcessing) return; 
 
@@ -178,7 +246,6 @@ export default function Home() {
            </div>
         </div>
 
-        {/* ✅ เพิ่ม class 'flex items-center' ตรงนี้ครับ Gap จะทำงานแล้ว */}
         <div className="flex-none flex items-center gap-2">
            {/* ปุ่มครัว */}
            <Link href="/kitchen" className="btn btn-neutral btn-sm md:btn-md shadow-sm">
@@ -209,7 +276,7 @@ export default function Home() {
           <Lock />
           <div>
             <h3 className="font-bold">ระบบปิดรับออเดอร์ชั่วคราว</h3>
-            <div className="text-xs">ไม่สามารถเปิดบิลใหม่ได้ กรุณาเปิดร้านที่หน้า Admin</div>
+            <div className="text-xs">ไม่สามารถเปิดบิลใหม่ได้ กรุณาเปิดร้านที่หน้า Admin (หรือรอเวลาเปิดทำการ)</div>
           </div>
         </div>
       )}
