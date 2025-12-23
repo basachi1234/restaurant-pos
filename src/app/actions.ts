@@ -80,7 +80,6 @@ export async function getSession() {
         const { payload } = await jwtVerify(token, JWT_SECRET)
         return { role: payload.role as string }
     } catch (error) {
-        // Token ไม่ถูกต้อง หรือ Secret Key เปลี่ยน
         return { role: null }
     }
 }

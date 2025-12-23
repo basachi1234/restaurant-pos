@@ -43,7 +43,6 @@ type Discount = {
 function CashierContent() {
   const searchParams = useSearchParams(); 
   
-  // Data State
   const [occupiedTables, setOccupiedTables] = useState<any[]>([]);
   const [selectedOrder, setSelectedOrder] = useState<OrderDetail | null>(null);
   const [qrCodeData, setQrCodeData] = useState<string>("");
@@ -52,21 +51,16 @@ function CashierContent() {
   const [shopLogo, setShopLogo] = useState<string | null>(null);
   const [discounts, setDiscounts] = useState<Discount[]>([]);
   const [selectedDiscountId, setSelectedDiscountId] = useState<number | "">("");
-
   const [isPaymentSuccess, setIsPaymentSuccess] = useState(false);
-
-  // Payment State
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState<'cash' | 'transfer'>('transfer');
   const [cashReceived, setCashReceived] = useState<string>("");
   const [currentReceiptNo, setCurrentReceiptNo] = useState<string>("");
-
-  // History State
   const [showHistoryModal, setShowHistoryModal] = useState(false);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [historyOrders, setHistoryOrders] = useState<any[]>([]);
   const [historyDate, setHistoryDate] = useState<string>(new Date().toISOString().split('T')[0]);
 
-  // สร้าง fetchOccupiedTables เป็น useCallback เพื่อใช้ใน dependency
   const fetchOccupiedTables = useCallback(async () => {
     const { data: tables } = await supabase.from("tables").select("id, label, status").eq("status", "occupied").order("id");
     setOccupiedTables(tables || []);
@@ -100,9 +94,9 @@ function CashierContent() {
     fetchStoreInfo();
     fetchOccupiedTables();
     fetchDiscounts();
-  }, [fetchOccupiedTables]); // เพิ่ม dependency
+  }, [fetchOccupiedTables]);
 
-  // ✅ ย้าย handleSelectTable มาไว้ตรงนี้ (ก่อน useEffect ที่เรียกใช้) และใส่ useCallback
+  // ✅ ย้ายมาไว้ข้างบน + ใช้ useCallback
   const handleSelectTable = useCallback(async (tableId: number, tableLabel: string) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data: order } = await supabase.from("orders").select(`id, order_items ( quantity, status, menu_items ( name, price, promotion_qty, promotion_price ) )`).eq("table_id", tableId).eq("status", "active").single();

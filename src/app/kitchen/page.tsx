@@ -22,6 +22,7 @@ export default function KitchenPage() {
     const [groupedOrders, setGroupedOrders] = useState<GroupedOrder[]>([]);
     const audioRef = useRef<HTMLAudioElement | null>(null);
 
+    // ✅ ย้ายมาไว้ข้างบน
     const playSound = () => {
         if (audioRef.current) {
             audioRef.current.currentTime = 0;
@@ -31,7 +32,7 @@ export default function KitchenPage() {
         }
     };
 
-    // ✅ ใช้ useCallback เพื่อให้ฟังก์ชันนี้เสถียร และใส่ใน dependency ของ useEffect ได้
+    // ✅ ย้ายมาไว้ข้างบน + ใช้ useCallback
     const fetchOrders = useCallback(async () => {
         const { data: rawItems, error } = await supabase
             .from("order_items")
@@ -93,10 +94,11 @@ export default function KitchenPage() {
         });
 
         setGroupedOrders(groups);
-    }, []); // ไม่มี dependency เพราะ supabase เป็น external constant
+    }, []);
 
+    // ✅ useEffect เรียกใช้ฟังก์ชันที่ประกาศไว้แล้ว
     useEffect(() => {
-        fetchOrders(); // เรียกครั้งแรก
+        fetchOrders();
 
         const channel = supabase
             .channel("realtime-kitchen")
@@ -104,7 +106,7 @@ export default function KitchenPage() {
                 "postgres_changes",
                 { event: "*", schema: "public", table: "order_items" },
                 (payload) => {
-                    fetchOrders(); // เรียกเมื่อมีข้อมูลใหม่
+                    fetchOrders();
                     if (payload.eventType === 'INSERT') {
                         playSound();
                     }
@@ -115,7 +117,7 @@ export default function KitchenPage() {
         return () => {
             supabase.removeChannel(channel);
         };
-    }, [fetchOrders]); // ✅ ใส่ fetchOrders เป็น dependency ได้อย่างปลอดภัย
+    }, [fetchOrders]); 
 
     const markItemDone = async (itemId: number) => {
         await supabase.from("order_items").update({ status: "served" }).eq("id", itemId);
@@ -131,23 +133,13 @@ export default function KitchenPage() {
             <audio ref={audioRef} src="/notification.mp3" />
 
             <div className="flex justify-between items-center mb-6 bg-gray-800 p-4 rounded-xl shadow-lg border border-gray-700">
-                <Link
-                    href="/"
-                    className="bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded-lg flex items-center gap-2 transition-colors text-gray-200"
-                >
-                    <ArrowLeft size={20} />
-                    กลับหน้าร้าน
+                <Link href="/" className="bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded-lg flex items-center gap-2 transition-colors text-gray-200">
+                    <ArrowLeft size={20} /> กลับหน้าร้าน
                 </Link>
-
                 <div className="flex items-center gap-4">
-                    <button
-                        onClick={playSound}
-                        className="bg-gray-700 p-2 rounded-full hover:bg-gray-600 text-yellow-400 transition-all border border-gray-600"
-                        title="ทดสอบเสียงเตือน"
-                    >
+                    <button onClick={playSound} className="bg-gray-700 p-2 rounded-full hover:bg-gray-600 text-yellow-400 transition-all border border-gray-600">
                         <Volume2 size={24} />
                     </button>
-
                     <h1 className="text-2xl md:text-3xl font-bold flex items-center gap-2">
                         👨‍🍳 รายการอาหารเข้าครัว <span className="bg-orange-600 text-sm px-2 py-1 rounded-full">{groupedOrders.length} บิล</span>
                     </h1>
@@ -156,58 +148,33 @@ export default function KitchenPage() {
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
                 {groupedOrders.map((group) => (
-                    <div
-                        key={group.unique_key}
-                        className="bg-white text-gray-800 rounded-xl shadow-2xl overflow-hidden flex flex-col border-t-4 border-orange-500 animate-in fade-in zoom-in duration-300"
-                    >
+                    <div key={group.unique_key} className="bg-white text-gray-800 rounded-xl shadow-2xl overflow-hidden flex flex-col border-t-4 border-orange-500 animate-in fade-in zoom-in duration-300">
                         <div className="bg-orange-50 p-3 flex justify-between items-center border-b border-orange-100">
-                            <span className="text-3xl font-black text-orange-600 tracking-tighter">
-                                {group.table_label}
-                            </span>
+                            <span className="text-3xl font-black text-orange-600 tracking-tighter">{group.table_label}</span>
                             <span className="text-xs text-gray-500 flex items-center gap-1 font-mono">
                                 <Clock size={12} />
-                                {new Date(group.created_at).toLocaleTimeString("th-TH", {
-                                    hour: "2-digit",
-                                    minute: "2-digit",
-                                })}
+                                {new Date(group.created_at).toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" })}
                             </span>
                         </div>
-
                         <div className="flex-1 p-0">
                             {group.items.map((item, index) => (
-                                <div
-                                    key={item.id}
-                                    className={`p-3 flex justify-between items-start border-b hover:bg-gray-50 transition-colors ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}`}
-                                >
+                                <div key={item.id} className={`p-3 flex justify-between items-start border-b hover:bg-gray-50 transition-colors ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}`}>
                                     <div className="flex-1">
                                         <div className="flex items-baseline gap-2">
                                             <span className="text-lg font-bold text-gray-800">{item.menu_name}</span>
                                             <span className="text-xl font-black text-blue-600">x{item.quantity}</span>
                                         </div>
-                                        {item.notes && (
-                                            <div className="text-red-600 text-sm font-bold mt-1 bg-red-50 inline-block px-2 rounded border border-red-100">
-                                                ⚠️ {item.notes}
-                                            </div>
-                                        )}
+                                        {item.notes && <div className="text-red-600 text-sm font-bold mt-1 bg-red-50 inline-block px-2 rounded border border-red-100">⚠️ {item.notes}</div>}
                                     </div>
-
-                                    <button
-                                        onClick={() => markItemDone(item.id)}
-                                        className="ml-2 p-2 text-gray-300 hover:text-green-600 hover:bg-green-50 rounded-full transition-all"
-                                    >
+                                    <button onClick={() => markItemDone(item.id)} className="ml-2 p-2 text-gray-300 hover:text-green-600 hover:bg-green-50 rounded-full transition-all">
                                         <CheckCircle size={28} />
                                     </button>
                                 </div>
                             ))}
                         </div>
-
                         <div className="p-3 bg-gray-50 border-t">
-                            <button
-                                onClick={() => markAllDone(group.items)}
-                                className="w-full bg-green-600 hover:bg-green-700 text-white py-3 rounded-lg font-bold text-lg flex items-center justify-center gap-2 shadow-md hover:shadow-lg transition-all active:scale-95"
-                            >
-                                <CheckSquare size={20} />
-                                เสร็จทั้งหมด ({group.items.length})
+                            <button onClick={() => markAllDone(group.items)} className="w-full bg-green-600 hover:bg-green-700 text-white py-3 rounded-lg font-bold text-lg flex items-center justify-center gap-2 shadow-md hover:shadow-lg transition-all active:scale-95">
+                                <CheckSquare size={20} /> เสร็จทั้งหมด ({group.items.length})
                             </button>
                         </div>
                     </div>
