@@ -1,11 +1,10 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useCallback } from "react"; // ✅ เพิ่ม useCallback
 import { supabase } from "@/lib/supabase";
 import { CheckCircle, Clock, ArrowLeft, CheckSquare, Volume2 } from "lucide-react";
 import Link from "next/link";
 
-// โครงสร้างข้อมูลสำหรับแสดงผล
 type GroupedOrder = {
     unique_key: string;
     order_id: string;
@@ -23,7 +22,6 @@ export default function KitchenPage() {
     const [groupedOrders, setGroupedOrders] = useState<GroupedOrder[]>([]);
     const audioRef = useRef<HTMLAudioElement | null>(null);
 
-    // ✅ ย้ายฟังก์ชันมาไว้ข้างบน (ก่อน useEffect)
     const playSound = () => {
         if (audioRef.current) {
             audioRef.current.currentTime = 0;
@@ -33,8 +31,8 @@ export default function KitchenPage() {
         }
     };
 
-    // ✅ ย้ายฟังก์ชันมาไว้ข้างบน (ก่อน useEffect)
-    const fetchOrders = async () => {
+    // ✅ ใช้ useCallback เพื่อให้ฟังก์ชันนี้เสถียร และใส่ใน dependency ของ useEffect ได้
+    const fetchOrders = useCallback(async () => {
         const { data: rawItems, error } = await supabase
             .from("order_items")
             .select(`
@@ -95,11 +93,10 @@ export default function KitchenPage() {
         });
 
         setGroupedOrders(groups);
-    };
+    }, []); // ไม่มี dependency เพราะ supabase เป็น external constant
 
-    // ✅ useEffect อยู่หลังฟังก์ชันที่เรียกใช้แล้ว (ไม่ Error แล้ว)
     useEffect(() => {
-        fetchOrders();
+        fetchOrders(); // เรียกครั้งแรก
 
         const channel = supabase
             .channel("realtime-kitchen")
@@ -107,7 +104,7 @@ export default function KitchenPage() {
                 "postgres_changes",
                 { event: "*", schema: "public", table: "order_items" },
                 (payload) => {
-                    fetchOrders();
+                    fetchOrders(); // เรียกเมื่อมีข้อมูลใหม่
                     if (payload.eventType === 'INSERT') {
                         playSound();
                     }
@@ -118,7 +115,7 @@ export default function KitchenPage() {
         return () => {
             supabase.removeChannel(channel);
         };
-    }, []);
+    }, [fetchOrders]); // ✅ ใส่ fetchOrders เป็น dependency ได้อย่างปลอดภัย
 
     const markItemDone = async (itemId: number) => {
         await supabase.from("order_items").update({ status: "served" }).eq("id", itemId);
