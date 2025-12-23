@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useMemo, Suspense, useCallback } from "react"; // ✅ เพิ่ม useCallback
+import { useEffect, useState, useMemo, Suspense, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import generatePayload from "promptpay-qr";
 import QRCode from "qrcode";
@@ -43,6 +43,7 @@ type Discount = {
 function CashierContent() {
   const searchParams = useSearchParams(); 
   
+  // Data State
   const [occupiedTables, setOccupiedTables] = useState<any[]>([]);
   const [selectedOrder, setSelectedOrder] = useState<OrderDetail | null>(null);
   const [qrCodeData, setQrCodeData] = useState<string>("");
@@ -51,11 +52,16 @@ function CashierContent() {
   const [shopLogo, setShopLogo] = useState<string | null>(null);
   const [discounts, setDiscounts] = useState<Discount[]>([]);
   const [selectedDiscountId, setSelectedDiscountId] = useState<number | "">("");
+
   const [isPaymentSuccess, setIsPaymentSuccess] = useState(false);
+
+  // Payment State
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState<'cash' | 'transfer'>('transfer');
   const [cashReceived, setCashReceived] = useState<string>("");
   const [currentReceiptNo, setCurrentReceiptNo] = useState<string>("");
+
+  // History State
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [historyOrders, setHistoryOrders] = useState<any[]>([]);
@@ -96,7 +102,6 @@ function CashierContent() {
     fetchDiscounts();
   }, [fetchOccupiedTables]);
 
-  // ✅ ย้ายมาไว้ข้างบน + ใช้ useCallback
   const handleSelectTable = useCallback(async (tableId: number, tableLabel: string) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data: order } = await supabase.from("orders").select(`id, order_items ( quantity, status, menu_items ( name, price, promotion_qty, promotion_price ) )`).eq("table_id", tableId).eq("status", "active").single();
@@ -142,7 +147,6 @@ function CashierContent() {
     });
   }, [fetchOccupiedTables]);
 
-  // Logic ทางลัด
   useEffect(() => {
     const targetTableId = searchParams.get("table_id");
     if (targetTableId && occupiedTables.length > 0) {
@@ -160,7 +164,6 @@ function CashierContent() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showHistoryModal, historyDate]);
 
-  // Calculation Logic
   const calculation = useMemo(() => {
     if (!selectedOrder) return { subtotal: 0, discount: 0, grandTotal: 0, discountName: "", itemDetails: [] };
 
@@ -203,7 +206,6 @@ function CashierContent() {
     return { subtotal, discount, grandTotal, discountName, itemDetails };
   }, [selectedOrder, selectedDiscountId, discounts]);
 
-  // QR Code Generation
   useEffect(() => {
     const genQR = async () => {
       if (!promptPayId || calculation.grandTotal <= 0) {
@@ -219,9 +221,11 @@ function CashierContent() {
     genQR();
   }, [calculation.grandTotal, promptPayId]);
 
+  // ✅ ฟังก์ชันที่แก้ไขแล้ว (เพิ่มการดึง cash_received และ logic แสดงผล)
   const handleSelectHistoryOrder = async (orderId: string, receiptNo: string) => {
+    // 1. เพิ่ม cash_received ในคำสั่ง select
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data: order } = await supabase.from("orders").select(`id, total_price, promotion_name, payment_method, tables ( label, id ), order_items ( quantity, status, menu_items ( name, price, promotion_qty, promotion_price ) )`).eq("id", orderId).single();
+    const { data: order } = await supabase.from("orders").select(`id, total_price, promotion_name, payment_method, cash_received, tables ( label, id ), order_items ( quantity, status, menu_items ( name, price, promotion_qty, promotion_price ) )`).eq("id", orderId).single();
     if (!order) return;
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -235,9 +239,19 @@ function CashierContent() {
       order_id: order.id, table_label: (order.tables as any)?.label || "Takeaway", table_id: (order.tables as any)?.id || 0,
       items, total: order.total_price, pendingCount: 0, isReprint: true, promotion_name: order.promotion_name
     });
+    
     setCurrentReceiptNo(receiptNo || "-");
-    setShowHistoryModal(false); setSelectedDiscountId(""); 
+    setShowHistoryModal(false); 
+    setSelectedDiscountId(""); 
     setPaymentMethod((order.payment_method as 'cash'|'transfer') || 'transfer');
+    
+    // 2. Logic ดึงค่า cash_received กลับมาแสดง
+    if (order.payment_method === 'cash' && order.cash_received) {
+        setCashReceived(order.cash_received.toString());
+    } else {
+        setCashReceived(""); 
+    }
+    
     setIsPaymentSuccess(true);
   };
 
@@ -263,7 +277,8 @@ function CashierContent() {
         p_order_id: selectedOrder.order_id,
         p_discount_id: selectedDiscountId === "" ? null : Number(selectedDiscountId),
         p_payment_method: paymentMethod,
-        p_receipt_no: receiptNo
+        p_receipt_no: receiptNo,
+        p_cash_received: paymentMethod === 'cash' ? Number(cashReceived) : 0
       });
 
       if (error) throw error;

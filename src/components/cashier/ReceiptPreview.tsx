@@ -67,7 +67,6 @@ export default function ReceiptPreview({
   }
 
   return (
-    // ✅ แก้ไข: เพิ่ม 'print:static' และ 'print:p-0' เพื่อแก้ปัญหาพื้นที่ว่างด้านบน
     <div className="w-full md:w-[320px] bg-white rounded-xl shadow-lg p-3 relative h-fit flex-shrink-0 print:static print:shadow-none print:p-0 print:m-0 print:bg-transparent">
       
       {(selectedOrder.isReprint || isPaymentSuccess) && (
@@ -128,11 +127,23 @@ export default function ReceiptPreview({
               <span>{calculation.grandTotal.toLocaleString()} ฿</span>
             </div>
             
-            {(!selectedOrder.isReprint || isPaymentSuccess) && paymentMethod === 'cash' && cashReceived && (
-              <div className="text-[10px] text-gray-500 mt-2 print:block hidden">
-                  <div className="flex justify-between"><span>รับเงิน:</span><span>{parseFloat(cashReceived).toLocaleString()}</span></div>
-                  <div className="flex justify-between"><span>เงินทอน:</span><span>{changeAmount.toLocaleString()}</span></div>
+            {/* ✅ แก้ไข: แสดงเงินทอนเสมอเมื่อจ่ายด้วยเงินสดสำเร็จ (ทั้งจอและพิมพ์) */}
+            {isPaymentSuccess && paymentMethod === 'cash' && (
+              <div className="text-[10px] text-gray-500 mt-2 pt-1 border-t border-dashed border-gray-300 print:text-black">
+                  <div className="flex justify-between">
+                    <span>รับเงินสด:</span>
+                    <span>{Number(cashReceived).toLocaleString()}</span>
+                  </div>
+                  <div className="flex justify-between font-bold text-black">
+                    <span>เงินทอน:</span>
+                    <span>{changeAmount.toLocaleString()}</span>
+                  </div>
               </div>
+            )}
+            
+            {/* กรณีโอนจ่าย แสดงข้อความเล็กๆ */}
+            {isPaymentSuccess && paymentMethod === 'transfer' && (
+               <div className="text-[9px] text-right text-gray-400 mt-1 italic">ชำระโดย: โอนเงิน/QR</div>
             )}
           </div>
 
