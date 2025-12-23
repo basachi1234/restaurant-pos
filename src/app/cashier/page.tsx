@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useMemo, Suspense } from "react";
+import { useEffect, useState, useMemo, Suspense, useCallback } from "react"; // ✅ เพิ่ม useCallback
 import { supabase } from "@/lib/supabase";
 import generatePayload from "promptpay-qr";
 import QRCode from "qrcode";
@@ -66,11 +66,87 @@ function CashierContent() {
   const [historyOrders, setHistoryOrders] = useState<any[]>([]);
   const [historyDate, setHistoryDate] = useState<string>(new Date().toISOString().split('T')[0]);
 
+  // สร้าง fetchOccupiedTables เป็น useCallback เพื่อใช้ใน dependency
+  const fetchOccupiedTables = useCallback(async () => {
+    const { data: tables } = await supabase.from("tables").select("id, label, status").eq("status", "occupied").order("id");
+    setOccupiedTables(tables || []);
+  }, []);
+
+  const fetchStoreInfo = async () => {
+    const { data } = await supabase.from("store_settings").select("*").eq("id", 1).single();
+    if (data) {
+      setShopName(data.shop_name || "ร้านอาหาร");
+      setPromptPayId(data.promptpay_id || "");
+      setShopLogo(data.shop_logo_url);
+    }
+  };
+
+  const fetchDiscounts = async () => {
+    const { data } = await supabase.from("discounts").select("*").eq("is_active", true).order("id");
+    setDiscounts(data || []);
+  };
+
+  const fetchHistoryOrders = async () => {
+    const start = new Date(historyDate); start.setHours(0, 0, 0, 0);
+    const end = new Date(historyDate); end.setHours(23, 59, 59, 999);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data } = await supabase.from("orders").select("id, receipt_no, total_price, created_at, tables(label)")
+      .eq("status", "completed").gte("created_at", start.toISOString()).lte("created_at", end.toISOString())
+      .order("created_at", { ascending: false });
+    setHistoryOrders(data || []);
+  };
+
   useEffect(() => {
     fetchStoreInfo();
     fetchOccupiedTables();
     fetchDiscounts();
-  }, []);
+  }, [fetchOccupiedTables]); // เพิ่ม dependency
+
+  // ✅ ย้าย handleSelectTable มาไว้ตรงนี้ (ก่อน useEffect ที่เรียกใช้) และใส่ useCallback
+  const handleSelectTable = useCallback(async (tableId: number, tableLabel: string) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: order } = await supabase.from("orders").select(`id, order_items ( quantity, status, menu_items ( name, price, promotion_qty, promotion_price ) )`).eq("table_id", tableId).eq("status", "active").single();
+    if (!order) {
+      if (confirm(`⚠️ โต๊ะ ${tableLabel} สถานะไม่ว่างแต่ไม่พบออเดอร์ ต้องการรีเซ็ต?`)) {
+        await supabase.from("tables").update({ status: "available" }).eq("id", tableId);
+        fetchOccupiedTables(); setSelectedOrder(null);
+      }
+      return;
+    }
+
+    const itemMap = new Map<string, any>();
+    let pendingCount = 0;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    order.order_items.forEach((i: any) => {
+      if (i.status !== 'served') pendingCount++;
+      const name = i.menu_items?.name || "สินค้าถูกลบ";
+      if (itemMap.has(name)) {
+        itemMap.get(name).quantity += i.quantity;
+      } else {
+        itemMap.set(name, {
+          name, price: i.menu_items?.price || 0, quantity: i.quantity, status: i.status,
+          promotion_qty: i.menu_items?.promotion_qty || 0, promotion_price: i.menu_items?.promotion_price || 0
+        });
+      }
+    });
+
+    const now = new Date();
+    const label = tableLabel.toUpperCase();
+    const prefix = (label.startsWith("TA") || label.startsWith("A")) ? 'A' : 'T';
+    const numPart = label.replace(/\D/g, '').padStart(2, '0');
+    const tempReceipt = `${now.getFullYear().toString().substr(-2)}${(now.getMonth()+1).toString().padStart(2,'0')}${now.getDate().toString().padStart(2,'0')}${now.getHours().toString().padStart(2,'0')}${now.getMinutes().toString().padStart(2,'0')}${prefix}${numPart}`;
+
+    setCurrentReceiptNo(tempReceipt);
+    setSelectedDiscountId(""); 
+    setCashReceived(""); 
+    setPaymentMethod("transfer");
+    setIsPaymentSuccess(false);
+    
+    setSelectedOrder({
+      order_id: order.id, table_label: tableLabel, table_id: tableId,
+      items: Array.from(itemMap.values()), total: 0, pendingCount, isReprint: false
+    });
+  }, [fetchOccupiedTables]);
 
   // Logic ทางลัด
   useEffect(() => {
@@ -83,10 +159,11 @@ function CashierContent() {
         handleSelectTable(targetTable.id, targetTable.label);
       }
     }
-  }, [occupiedTables, searchParams]);
+  }, [occupiedTables, searchParams, handleSelectTable, selectedOrder?.table_id]);
 
   useEffect(() => {
     if (showHistoryModal) fetchHistoryOrders();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showHistoryModal, historyDate]);
 
   // Calculation Logic
@@ -148,84 +225,9 @@ function CashierContent() {
     genQR();
   }, [calculation.grandTotal, promptPayId]);
 
-  const fetchStoreInfo = async () => {
-    const { data } = await supabase.from("store_settings").select("*").eq("id", 1).single();
-    if (data) {
-      setShopName(data.shop_name || "ร้านอาหาร");
-      setPromptPayId(data.promptpay_id || "");
-      setShopLogo(data.shop_logo_url);
-    }
-  };
-
-  const fetchOccupiedTables = async () => {
-    const { data: tables } = await supabase.from("tables").select("id, label, status").eq("status", "occupied").order("id");
-    setOccupiedTables(tables || []);
-  };
-
-  const fetchDiscounts = async () => {
-    const { data } = await supabase.from("discounts").select("*").eq("is_active", true).order("id");
-    setDiscounts(data || []);
-  };
-
-  const fetchHistoryOrders = async () => {
-    const start = new Date(historyDate); start.setHours(0, 0, 0, 0);
-    const end = new Date(historyDate); end.setHours(23, 59, 59, 999);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data } = await supabase.from("orders").select("id, receipt_no, total_price, created_at, tables(label)")
-      .eq("status", "completed").gte("created_at", start.toISOString()).lte("created_at", end.toISOString())
-      .order("created_at", { ascending: false });
-    setHistoryOrders(data || []);
-  };
-
-  // Handlers
-  const handleSelectTable = async (tableId: number, tableLabel: string) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data: order } = await supabase.from("orders").select(`id, order_items ( quantity, status, menu_items ( name, price, promotion_qty, promotion_price ) )`).eq("table_id", tableId).eq("status", "active").single();
-    if (!order) {
-      if (confirm(`⚠️ โต๊ะ ${tableLabel} สถานะไม่ว่างแต่ไม่พบออเดอร์ ต้องการรีเซ็ต?`)) {
-        await supabase.from("tables").update({ status: "available" }).eq("id", tableId);
-        fetchOccupiedTables(); setSelectedOrder(null);
-      }
-      return;
-    }
-
-    const itemMap = new Map<string, any>();
-    let pendingCount = 0;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    order.order_items.forEach((i: any) => {
-      if (i.status !== 'served') pendingCount++;
-      const name = i.menu_items.name;
-      if (itemMap.has(name)) {
-        itemMap.get(name).quantity += i.quantity;
-      } else {
-        itemMap.set(name, {
-          name, price: i.menu_items.price, quantity: i.quantity, status: i.status,
-          promotion_qty: i.menu_items.promotion_qty || 0, promotion_price: i.menu_items.promotion_price || 0
-        });
-      }
-    });
-
-    const now = new Date();
-    const label = tableLabel.toUpperCase();
-    const prefix = (label.startsWith("TA") || label.startsWith("A")) ? 'A' : 'T';
-    const numPart = label.replace(/\D/g, '').padStart(2, '0');
-    const tempReceipt = `${now.getFullYear().toString().substr(-2)}${(now.getMonth()+1).toString().padStart(2,'0')}${now.getDate().toString().padStart(2,'0')}${now.getHours().toString().padStart(2,'0')}${now.getMinutes().toString().padStart(2,'0')}${prefix}${numPart}`;
-
-    setCurrentReceiptNo(tempReceipt);
-    setSelectedDiscountId(""); 
-    setCashReceived(""); 
-    setPaymentMethod("transfer");
-    setIsPaymentSuccess(false);
-    
-    setSelectedOrder({
-      order_id: order.id, table_label: tableLabel, table_id: tableId,
-      items: Array.from(itemMap.values()), total: 0, pendingCount, isReprint: false
-    });
-  };
-
   const handleSelectHistoryOrder = async (orderId: string, receiptNo: string) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data: order } = await supabase.from("orders").select(`id, total_price, promotion_name, tables ( label, id ), order_items ( quantity, status, menu_items ( name, price, promotion_qty, promotion_price ) )`).eq("id", orderId).single();
+    const { data: order } = await supabase.from("orders").select(`id, total_price, promotion_name, payment_method, tables ( label, id ), order_items ( quantity, status, menu_items ( name, price, promotion_qty, promotion_price ) )`).eq("id", orderId).single();
     if (!order) return;
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -240,7 +242,8 @@ function CashierContent() {
       items, total: order.total_price, pendingCount: 0, isReprint: true, promotion_name: order.promotion_name
     });
     setCurrentReceiptNo(receiptNo || "-");
-    setShowHistoryModal(false); setSelectedDiscountId(""); setPaymentMethod('transfer');
+    setShowHistoryModal(false); setSelectedDiscountId(""); 
+    setPaymentMethod((order.payment_method as 'cash'|'transfer') || 'transfer');
     setIsPaymentSuccess(true);
   };
 
@@ -359,14 +362,12 @@ function CashierContent() {
         />
       )}
       
-      {/* ✅ ปรับ CSS Global สำหรับ Print */}
       <style jsx global>{`
         @media print {
           @page {
             size: auto;
             margin: 0mm; 
           }
-          
           html, body {
             height: auto;
             overflow: visible;
@@ -374,25 +375,21 @@ function CashierContent() {
             margin: 0; 
             padding: 0;
           }
-
           body * {
             visibility: hidden;
           }
-
           #receipt-area, #receipt-area * {
             visibility: visible;
           }
-
           #receipt-area {
-            position: fixed; /* ✅ ใช้ fixed เพื่อบังคับเกาะมุมซ้ายบนของกระดาษเสมอ */
+            position: fixed;
             left: 0 !important;
             top: 0 !important;
-            width: 100% !important; /* เต็มความกว้างพื้นที่พิมพ์ที่เหลือ (margin 0) */
+            width: 100% !important;
             z-index: 9999;
             margin: 0 !important;
-            padding: 0 5mm !important; /* บังคับ Padding ซ้ายขวาที่นี่อีกทีเพื่อความชัวร์ */
+            padding: 0 5mm !important;
           }
-
           * {
             -webkit-print-color-adjust: exact !important;
             print-color-adjust: exact !important;

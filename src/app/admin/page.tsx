@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react"; // ✅ เพิ่ม useCallback
 import { supabase } from "@/lib/supabase";
 import {
-  ArrowLeft, Power, LockKeyhole, TrendingUp, Utensils, Users, Wallet, FileText, TicketPercent, Settings as SettingsIcon, Banknote
+  ArrowLeft, Power, LockKeyhole, TrendingUp, Users, Wallet, FileText, TicketPercent, Settings as SettingsIcon, Banknote
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { MenuItem, Category, UserProfile, Transaction, TopItem, Discount } from "@/lib/types";
@@ -55,7 +55,8 @@ export default function AdminPage() {
   // State สถานะร้าน
   const [isStoreOpen, setIsStoreOpen] = useState(true);
 
-  const fetchData = async () => {
+  // ✅ ใช้ useCallback เพื่อป้องกันการสร้างฟังก์ชันใหม่ทุกครั้งที่ render
+  const fetchData = useCallback(async () => {
     // 1. Basic Data
     const { data: menuData } = await supabase.from("menu_items").select("*").order("id");
     const { data: catData } = await supabase.from("categories").select("*").order("id");
@@ -98,53 +99,43 @@ export default function AdminPage() {
       });
       setTopItems(Object.values(itemMap).sort((a, b) => b.quantity - a.quantity).slice(0, 5));
     }
-  };
+  }, []); // ไม่มี dependencies เพราะ supabase เป็น external instance
 
-  useEffect(() => { if (isAuthenticated) fetchData(); }, [isAuthenticated]);
+  // ✅ ใส่ fetchData ใน dependency array
+  useEffect(() => { 
+    if (isAuthenticated) fetchData(); 
+  }, [isAuthenticated, fetchData]);
 
-  // ✅ ฟังก์ชัน Toggle เปิด/ปิดร้าน (ปรับปรุงใหม่)
   const toggleStoreStatus = async () => {
     const action = isStoreOpen ? "ปิด" : "เปิด";
     
-    // ถ้าจะปิดร้าน เช็คโต๊ะค้างก่อน
     if (isStoreOpen && activeTableCount > 0) {
       return alert(`⚠️ ยังมีลูกค้าใช้งานอยู่ ${activeTableCount} โต๊ะ\nกรุณาเคลียร์โต๊ะก่อนปิดร้าน`);
     }
 
     if (!confirm(`ยืนยัน "${action}ร้าน"?`)) return;
 
-    // 1. ดำเนินการตามลอจิก (สรุปยอด หรือ เริ่มวันใหม่)
     if (isStoreOpen) { 
-      // --- กรณีปิดร้าน (Closing shop logic) ---
       try {
-        // ใช้ RPC เพื่อสรุปยอดและบันทึกลง Transactions
         const { error: rpcError } = await supabase.rpc('close_shop_day');
-        
         if (rpcError) {
           console.error("RPC Error:", rpcError);
-          // ถ้าสรุปยอดไม่ผ่าน ให้หยุดและแจ้งเตือน ไม่ฝืนปิดร้าน
           return alert("❌ เกิดข้อผิดพลาดในการสรุปยอดบัญชี กรุณาลองใหม่อีกครั้ง");
         }
-        
         alert("✅ สรุปยอดและบันทึกบัญชีเรียบร้อย"); 
-
       } catch (e) { 
         console.error(e); 
         return alert("เกิดข้อผิดพลาดในการสรุปยอด"); 
       }
     } else { 
-      // --- กรณีเปิดร้าน (Opening shop logic) ---
       const { error: openError } = await supabase.from("store_settings").update({ current_business_day: new Date().toISOString() }).eq("id", 1);
-      
       if (openError) {
         console.error("Open Shop Error:", openError);
         return alert("❌ ไม่สามารถเปิดร้านได้ กรุณาลองใหม่");
       }
-      
       alert("✅ เปิดร้านเรียบร้อย เริ่มรับออเดอร์ได้เลย!"); 
     }
 
-    // 2. ✅ อัปเดตสถานะ "เปิด/ปิด" ลง DB และเช็ค Error อย่างเคร่งครัด
     const newStatus = !isStoreOpen;
     const { error: updateError } = await supabase
       .from("store_settings")
@@ -156,9 +147,8 @@ export default function AdminPage() {
       return alert("❌ ไม่สามารถบันทึกสถานะร้านได้ (อินเทอร์เน็ตอาจมีปัญหา) กรุณาลองกดใหม่อีกครั้ง");
     }
 
-    // 3. ถ้าผ่านทุกด่าน ค่อยเปลี่ยนสีปุ่มที่หน้าจอ
     setIsStoreOpen(newStatus);
-    fetchData(); // ดึงข้อมูลล่าสุดเพื่อความชัวร์
+    fetchData(); 
   };
 
   const handleLogout = async () => {
@@ -171,14 +161,12 @@ export default function AdminPage() {
   return (
     <div className="min-h-screen bg-gray-50 p-6 pb-20">
       <div className="max-w-6xl mx-auto">
-        {/* Header */}
         <div className="flex flex-col md:flex-row justify-between items-center mb-8 bg-white p-4 rounded-xl shadow-sm border border-gray-100 print:hidden">
           <div className="flex items-center gap-4 mb-4 md:mb-0">
             <button onClick={() => router.push("/")} className="p-2 bg-gray-100 rounded-full hover:bg-gray-200"><ArrowLeft size={20} /></button>
             <div><h1 className="text-2xl font-bold text-gray-800">Restaurant Manager</h1></div>
           </div>
           <div className="flex items-center gap-3">
-            {/* ปุ่มเปิด/ปิดร้าน */}
             <button 
               onClick={toggleStoreStatus} 
               className={`flex items-center gap-2 px-4 py-2 rounded-lg font-bold text-sm shadow-sm transition-all active:scale-95 ${isStoreOpen ? 'bg-green-100 text-green-700 hover:bg-green-200' : 'bg-red-100 text-red-700 hover:bg-red-200'}`}
@@ -189,7 +177,6 @@ export default function AdminPage() {
           </div>
         </div>
 
-        {/* Tabs Navigation */}
         <div className="flex gap-2 mb-6 overflow-x-auto pb-2 no-scrollbar print:hidden">
           <button onClick={() => setActiveTab('dashboard')} className={`px-5 py-2 rounded-full font-bold flex items-center gap-2 text-sm whitespace-nowrap ${activeTab === 'dashboard' ? 'bg-blue-600 text-white' : 'bg-white text-gray-600'}`}><TrendingUp size={16} /> ภาพรวม</button>
           <button onClick={() => setActiveTab('reports')} className={`px-5 py-2 rounded-full font-bold flex items-center gap-2 text-sm whitespace-nowrap ${activeTab === 'reports' ? 'bg-blue-600 text-white' : 'bg-white text-gray-600'}`}><FileText size={16} /> รายงาน</button>
@@ -200,7 +187,6 @@ export default function AdminPage() {
           <button onClick={() => setActiveTab('settings')} className={`px-5 py-2 rounded-full font-bold flex items-center gap-2 text-sm whitespace-nowrap ${activeTab === 'settings' ? 'bg-blue-600 text-white' : 'bg-white text-gray-600'}`}><SettingsIcon size={16} /> ตั้งค่าร้าน</button>
         </div>
 
-        {/* Tab Contents */}
         {activeTab === 'dashboard' && <DashboardTab stats={stats} activeTableCount={activeTableCount} topItems={topItems} />}
         {activeTab === 'reports' && <ReportsTab />}
         {activeTab === 'accounting' && <AccountingTab transactions={transactions} onUpdate={fetchData} />}
