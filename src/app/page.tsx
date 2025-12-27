@@ -23,33 +23,34 @@ export default function Home() {
   const [shopName, setShopName] = useState("ร้านอาหาร");
   const [shopLogo, setShopLogo] = useState<string | null>(null);
 
-  // ✅ 1. เพิ่ม State เก็บเวลาเปิด-ปิดอัตโนมัติ
-  const [autoOpenTime, setAutoOpenTime] = useState<string | null>(null);
+  // ✅ 1. เหลือแค่ State สำหรับ Auto Close (ปิดอัตโนมัติ)
   const [autoCloseTime, setAutoCloseTime] = useState<string | null>(null);
 
   const router = useRouter();
 
-  // ✅ 2. ฟังก์ชันเช็คว่าตอนนี้ร้านควรเปิดหรือไม่ (ตามเวลา)
-  const checkIsShopOpenByTime = useCallback((openTime: string, closeTime: string) => {
+  // ✅ 2. ฟังก์ชันเช็คว่า "ยังไม่ถึงเวลาปิดใช่ไหม" (Auto Close Logic)
+  // สมมติว่าร้านเปิดทำการตั้งแต่ 06:00 น. (Start of Day) เพื่อให้คำนวณช่วงเวลาได้ถูกต้อง
+  const checkIsNotPastCloseTime = useCallback((closeTime: string) => {
     const now = new Date();
     const currentMinutes = now.getHours() * 60 + now.getMinutes();
     
-    const [openH, openM] = openTime.split(':').map(Number);
-    const startMinutes = openH * 60 + openM;
+    // Hardcode Start Time เป็น 06:00 น.
+    const startMinutes = 6 * 60; 
     
     const [closeH, closeM] = closeTime.split(':').map(Number);
     const endMinutes = closeH * 60 + closeM;
 
-    // กรณีร้านเปิดข้ามวัน (เช่น ปิดตี 2 -> endMinutes น้อยกว่า startMinutes)
+    // กรณีปิดข้ามวัน (เช่น ปิด 02:00) -> เปิดช่วง 06:00 ถึง 02:00 (ของอีกวัน)
     if (endMinutes < startMinutes) {
+      // ถือว่าเปิดอยู่ถ้า: เวลาปัจจุบัน >= 06:00 หรือ เวลาปัจจุบัน < 02:00
       return currentMinutes >= startMinutes || currentMinutes < endMinutes;
     }
     
-    // กรณีเปิดปิดในวันเดียว (เช่น 10:00 - 22:00)
+    // กรณีปิดในวันเดียว (เช่น ปิด 22:00) -> เปิดช่วง 06:00 ถึง 22:00
     return currentMinutes >= startMinutes && currentMinutes < endMinutes;
   }, []);
 
-  // ✅ 3. ปรับปรุง fetchData ให้ดึงเวลาและคำนวณสถานะเริ่มต้น
+  // ✅ 3. ปรับปรุง fetchData
   const fetchData = useCallback(async () => {
     const [tablesRes, settingsRes] = await Promise.all([
         supabase.from("tables").select("*").order("id", { ascending: true }),
@@ -59,24 +60,26 @@ export default function Home() {
     if (tablesRes.data) setTables(tablesRes.data);
 
     if (settingsRes.data) {
-      // เก็บค่าเวลาไว้ใน State
-      setAutoOpenTime(settingsRes.data.auto_open_time);
+      // เก็บค่าเวลาปิดไว้ใน State
       setAutoCloseTime(settingsRes.data.auto_close_time);
       
       setShopName(settingsRes.data.shop_name || "ร้านอาหาร");
       setShopLogo(settingsRes.data.shop_logo_url || null);
 
-      // คำนวณสถานะร้าน: ต้องเปิดทั้งใน DB และ ตามเวลา (ถ้าตั้งไว้)
+      // Logic สถานะร้าน:
+      // 1. ต้องกดเปิดจาก Admin (dbIsOpen) เป็นเงื่อนไขหลัก
+      // 2. ต้องยังไม่ถึงเวลาปิดอัตโนมัติ (isNotPastClose) เป็นเงื่อนไขบังคับปิด
       const dbIsOpen = settingsRes.data.is_open;
-      let timeIsOpen = true;
+      let isNotPastClose = true;
 
-      if (settingsRes.data.auto_open_time && settingsRes.data.auto_close_time) {
-         timeIsOpen = checkIsShopOpenByTime(settingsRes.data.auto_open_time, settingsRes.data.auto_close_time);
+      if (settingsRes.data.auto_close_time) {
+         isNotPastClose = checkIsNotPastCloseTime(settingsRes.data.auto_close_time);
       }
 
-      setIsStoreOpen(dbIsOpen && timeIsOpen);
+      // ร้านจะเปิดได้ก็ต่อเมื่อ: เจ้าของสั่งเปิด AND ยังไม่เลยเวลาปิด
+      setIsStoreOpen(dbIsOpen && isNotPastClose);
     }
-  }, [checkIsShopOpenByTime]);
+  }, [checkIsNotPastCloseTime]);
 
   useEffect(() => {
     const checkUser = async () => {
@@ -106,25 +109,22 @@ export default function Home() {
     };
   }, [fetchData]);
 
-  // ✅ 4. เพิ่ม Interval เช็คเวลาทุก 1 นาที (Auto Close หน้าบ้าน)
+  // ✅ 4. เพิ่ม Interval เช็คเวลาปิดทุก 1 นาที
   useEffect(() => {
-    if (!autoOpenTime || !autoCloseTime) return;
+    if (!autoCloseTime) return;
 
     const interval = setInterval(() => {
-      const isOpenByTime = checkIsShopOpenByTime(autoOpenTime, autoCloseTime);
+      const isNotPastClose = checkIsNotPastCloseTime(autoCloseTime);
       
-      // ถ้าเวลาบอกว่าปิดแล้ว แต่หน้าจอยังแสดงว่าเปิดอยู่ -> สั่งปิดเลย
-      if (!isOpenByTime && isStoreOpen) {
+      // ถ้าถึงเวลาปิดแล้ว (isNotPastClose = false) แต่หน้าจอยังเปิดอยู่ -> สั่งปิดหน้าจอทันที
+      if (!isNotPastClose && isStoreOpen) {
         setIsStoreOpen(false);
       }
-      // ถ้าถึงเวลาเปิด แล้วหน้าจอยังปิดอยู่ -> โหลดข้อมูลใหม่ (เผื่อสถานะใน DB เปลี่ยน)
-      else if (isOpenByTime && !isStoreOpen) {
-         fetchData(); 
-      }
+      // หมายเหตุ: ไม่มีการสั่งเปิดอัตโนมัติ (Manual Open Only)
     }, 60000); // เช็คทุก 1 นาที
 
     return () => clearInterval(interval);
-  }, [autoOpenTime, autoCloseTime, isStoreOpen, checkIsShopOpenByTime, fetchData]);
+  }, [autoCloseTime, isStoreOpen, checkIsNotPastCloseTime]);
 
 
   const handleLogout = async () => {
@@ -133,10 +133,10 @@ export default function Home() {
   };
 
   const handleTableClick = async (table: Table) => {
-    // ✅ 5. เช็คเวลาอีกครั้งก่อนกด (Lazy Check) กันคนเปิดหน้าค้างไว้
-    if (autoOpenTime && autoCloseTime) {
-       const isOpenByTime = checkIsShopOpenByTime(autoOpenTime, autoCloseTime);
-       if (!isOpenByTime) {
+    // ✅ 5. Lazy Check: เช็คเวลาปิดอีกครั้งก่อนกดสั่ง (กันคนเปิดหน้าจอค้างไว้)
+    if (autoCloseTime) {
+       const isNotPastClose = checkIsNotPastCloseTime(autoCloseTime);
+       if (!isNotPastClose) {
           setIsStoreOpen(false); 
           return alert("⛔ ร้านปิดให้บริการแล้วครับ (หมดเวลาทำการ)");
        }

@@ -13,7 +13,7 @@ export default function SettingsTab() {
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
   
-  // ✅ State สำหรับเวลาปิดร้านอัตโนมัติ
+  // ✅ State สำหรับเวลาปิดร้านอัตโนมัติ (Manual Open)
   const [autoCloseTime, setAutoCloseTime] = useState("03:00");
 
   // Cleanup
@@ -48,13 +48,20 @@ export default function SettingsTab() {
       let url = shopLogo;
       if (logoFile) url = await resizeAndUploadImage(logoFile);
 
-      // ✅ บันทึกข้อมูลรวมถึงเวลาปิดร้านอัตโนมัติ
-      await supabase.from("store_settings").update({ 
+      // ✅ แก้ไข: เอา auto_open_time ออก เพื่อไม่ให้ error เรื่องคอลัมน์ไม่มีอยู่จริง
+      const { error } = await supabase.from("store_settings").update({ 
         shop_name: shopName, 
         promptpay_id: promptPayId, 
         shop_logo_url: url,
+        // auto_open_time: null, // ❌ ลบบรรทัดนี้ออก
         auto_close_time: autoCloseTime 
       }).eq("id", 1);
+
+      // ✅ เพิ่ม: ดักจับ Error ถ้าบันทึกไม่ผ่าน
+      if (error) {
+        console.error("Save Error:", error);
+        throw error;
+      }
 
       const targetT = typeof totalTables === 'string' ? parseInt(totalTables) || 0 : totalTables;
       await updateTables(targetT, 'T');
@@ -64,8 +71,9 @@ export default function SettingsTab() {
 
       alert("บันทึกสำเร็จ! ✅");
       fetchData();
-    } catch {
-      alert("เกิดข้อผิดพลาดในการบันทึก");
+    } catch (err: any) {
+      console.error(err);
+      alert(`เกิดข้อผิดพลาดในการบันทึก: ${err.message || "Unknown error"}`);
     } finally {
       setUploading(false);
     }
@@ -184,14 +192,16 @@ export default function SettingsTab() {
                  <Clock size={16} className="text-blue-600"/> เวลาปิดร้านอัตโนมัติ (Auto Close)
                </label>
                <div className="text-xs text-gray-500 mb-2">
-                 *เมื่อถึงเวลานี้ ระบบจะปิดร้านให้อัตโนมัติหากลืมกดปิด
+                 *เจ้าของร้านเปิดร้านเอง (Manual) แต่ระบบจะช่วยปิดให้เมื่อถึงเวลานี้
                </div>
-               <input 
-                 type="time" 
-                 value={autoCloseTime} 
-                 onChange={(e) => setAutoCloseTime(e.target.value)}
-                 className="w-full p-2 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 bg-white"
-               />
+               <div className="max-w-[200px]">
+                   <input 
+                     type="time" 
+                     value={autoCloseTime} 
+                     onChange={(e) => setAutoCloseTime(e.target.value)}
+                     className="w-full p-2 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-red-500 bg-white"
+                   />
+               </div>
             </div>
           </div>
           <button disabled={uploading} className="bg-blue-600 text-white py-3 rounded-lg font-bold shadow-md hover:bg-blue-700">{uploading ? "..." : "บันทึกการตั้งค่า"}</button>
